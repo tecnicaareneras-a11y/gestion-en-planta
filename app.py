@@ -801,102 +801,87 @@ def mostrar_registro_rapido_qr(maquina_qr):
     st.title("📱 Registro Rápido por Código QR")
     st.markdown(f"### 🚜 Máquina Intervenida: **{maquina_qr}**")
     st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
-    
-    # Obtener base_url para links
-    config_file = "config_url.json"
-    base_url = "https://gestion-en-planta-adlc.streamlit.app"
-    if os.path.exists(config_file):
-        try:
-            with open(config_file, "r") as f:
-                data = json.load(f)
-                ext_url = data.get("url_externa", "").strip()
-                if ext_url:
-                    base_url = ext_url.rstrip("/")
-        except:
-            pass
-            
-    # Botón para ir al control diario (check-list) en una nueva ventana
-    st.link_button("📋 Registrar Control Diario (Check-List)", f"{base_url}/?qr_checklist={urllib.parse.quote(maquina_qr)}", use_container_width=True)
     st.markdown("---")
     
-    empleados_list_db = cargar_lista_columna("empleados", "Nombre")
+    tab_mant_qr, tab_chk_qr = st.tabs(["🔧 Registrar Mantenimiento", "📋 Control Diario (Check-List)"])
     
-    # Intentar pre-seleccionar el usuario logueado si coincide con algún empleado en base de datos (con búsqueda tolerante a acentos/casing)
+    empleados_list_db = cargar_lista_columna("empleados", "Nombre")
     usuario_logueado = st.session_state.get("usuario", "")
     indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
         
-    with st.form("form_registro_qr"):
-        deposito = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"])
-        operario = st.selectbox("Técnico Responsable", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar técnico...")
-        tipo = st.selectbox("Tipo de Mantenimiento", ["Correctivo", "Preventivo"])
-        
-        # Entrada rápida de horas con un control deslizante (slider)
-        duracion_horas = st.slider("Duración del trabajo (Horas)", min_value=0.5, max_value=8.0, value=1.0, step=0.5)
-        
-        st.markdown("##### 🔧 Tareas Realizadas (Selecciona con clics):")
-        col1, col2 = st.columns(2)
-        t1 = col1.checkbox("Revisión General")
-        t2 = col1.checkbox("Lubricación / Engrase")
-        t3 = col1.checkbox("Cambio de Aceite")
-        t4 = col2.checkbox("Limpieza de Filtros")
-        t5 = col2.checkbox("Ajuste de Correas / Pernos")
-        t6 = col2.checkbox("Reparación Eléctrica")
-        
-        detalle_adicional = st.text_input("Observación / Repuestos (opcional)", placeholder="Ej: Se cambió correa trapezoidal AVX13")
-        horimetro = st.number_input("Horímetro actual de la máquina (opcional)", min_value=0.0, step=0.1, format="%.1f")
-        
-        guardar = st.form_submit_button("💾 Registrar Mantenimiento")
-        
-        if guardar:
-            if not operario:
-                st.error("⚠️ Por favor selecciona el técnico responsable.")
-            else:
-                # Formatear el detalle
-                tareas = []
-                if t1: tareas.append("Revisión General")
-                if t2: tareas.append("Lubricación/Engrase")
-                if t3: tareas.append("Cambio de Aceite")
-                if t4: tareas.append("Limpieza de Filtros")
-                if t5: tareas.append("Ajuste de Correas/Pernos")
-                if t6: tareas.append("Reparación Eléctrica")
-                
-                detalle_final = ", ".join(tareas)
-                if detalle_adicional:
-                    if detalle_final:
-                        detalle_final += f". Obs: {detalle_adicional}"
-                    else:
-                        detalle_final = detalle_adicional
-                if not detalle_final:
-                    detalle_final = "Mantenimiento preventivo por código QR."
+    with tab_mant_qr:
+        with st.form("form_registro_qr"):
+            deposito = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"])
+            operario = st.selectbox("Técnico Responsable", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar técnico...")
+            tipo = st.selectbox("Tipo de Mantenimiento", ["Correctivo", "Preventivo"])
+            
+            duracion_horas = st.slider("Duración del trabajo (Horas)", min_value=0.5, max_value=8.0, value=1.0, step=0.5)
+            
+            st.markdown("##### 🔧 Tareas Realizadas (Selecciona con clics):")
+            col1, col2 = st.columns(2)
+            t1 = col1.checkbox("Revisión General")
+            t2 = col1.checkbox("Lubricación / Engrase")
+            t3 = col1.checkbox("Cambio de Aceite")
+            t4 = col2.checkbox("Limpieza de Filtros")
+            t5 = col2.checkbox("Ajuste de Correas / Pernos")
+            t6 = col2.checkbox("Reparación Eléctrica")
+            
+            detalle_adicional = st.text_input("Observación / Repuestos (opcional)", placeholder="Ej: Se cambió correa trapezoidal AVX13")
+            horimetro = st.number_input("Horímetro actual de la máquina (opcional)", min_value=0.0, step=0.1, format="%.1f")
+            
+            guardar = st.form_submit_button("💾 Registrar Mantenimiento")
+            
+            if guardar:
+                if not operario:
+                    st.error("⚠️ Por favor selecciona el técnico responsable.")
+                else:
+                    tareas = []
+                    if t1: tareas.append("Revisión General")
+                    if t2: tareas.append("Lubricación/Engrase")
+                    if t3: tareas.append("Cambio de Aceite")
+                    if t4: tareas.append("Limpieza de Filtros")
+                    if t5: tareas.append("Ajuste de Correas/Pernos")
+                    if t6: tareas.append("Reparación Eléctrica")
                     
-                # Calcular horas inicio y fin automáticas
-                hora_fin_dt = datetime.now()
-                hora_ini_dt = hora_fin_dt - pd.Timedelta(hours=duracion_horas)
-                inicio = hora_ini_dt.strftime("%H:%M")
-                fin = hora_fin_dt.strftime("%H:%M")
-                
-                fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                fecha_actividad = datetime.now().strftime("%Y-%m-%d")
-                
-                # Guardar en base de datos
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (fecha_actividad, maquina_qr, operario, tipo, inicio, fin, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("usuario")))
-                conn.commit()
-                conn.close()
-                
-                st.success("🎉 ¡Mantenimiento registrado con éxito!")
-                st.balloons()
-                st.info("Ya puede cerrar esta pestaña en su teléfono.")
+                    detalle_final = ", ".join(tareas)
+                    if detalle_adicional:
+                        if detalle_final:
+                            detalle_final += f". Obs: {detalle_adicional}"
+                        else:
+                            detalle_final = detalle_adicional
+                    if not detalle_final:
+                        detalle_final = "Mantenimiento preventivo por código QR."
+                        
+                    hora_fin_dt = datetime.now()
+                    hora_ini_dt = hora_fin_dt - pd.Timedelta(hours=duracion_horas)
+                    inicio = hora_ini_dt.strftime("%H:%M")
+                    fin = hora_fin_dt.strftime("%H:%M")
+                    
+                    fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    fecha_actividad = datetime.now().strftime("%Y-%m-%d")
+                    
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                    INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (fecha_actividad, maquina_qr, operario, tipo, inicio, fin, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("usuario")))
+                    conn.commit()
+                    conn.close()
+                    
+                    st.success("🎉 ¡Mantenimiento registrado con éxito!")
+                    st.balloons()
+                    st.info("Ya puede continuar en el sistema o cerrar la ventana.")
 
-def mostrar_checklist_diario_qr(maquina_qr):
-    st.title("📋 Control Diario (Check-List)")
-    st.markdown(f"### 🚜 Máquina: **{maquina_qr}**")
-    st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
-    st.markdown("---")
+    with tab_chk_qr:
+        mostrar_checklist_diario_qr(maquina_qr, titulo_vis=False)
+
+def mostrar_checklist_diario_qr(maquina_qr, titulo_vis=True):
+    if titulo_vis:
+        st.title("📋 Control Diario (Check-List)")
+        st.markdown(f"### 🚜 Máquina: **{maquina_qr}**")
+        st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
+        st.markdown("---")
     
     empleados_list_db = cargar_lista_columna("empleados", "Nombre")
     
