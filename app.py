@@ -10,38 +10,64 @@ import urllib.parse
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Gestión de Planta", layout="wide")
 
-# --- INYECCIÓN DE ESTILOS CSS PERSONALIZADOS (DISEÑO PREMIUM Y FUENTES MODERNAS) ---
+# --- INYECCIÓN DE ESTILOS CSS PERSONALIZADOS (DISEÑO FRACTTAL ONE) ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
     
     /* Configurar Fuente Global */
     html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        font-family: 'Outfit', sans-serif !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        background-color: #0b0f19 !important;
+        color: #f1f5f9 !important;
     }
     
-    /* Aplicar a elementos de texto específicos sin romper iconos */
+    /* Aplicar a elementos de texto específicos */
     h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, .stMetric, button div, div[role="radiogroup"] label {
-        font-family: 'Outfit', sans-serif !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+    }
+
+    /* Header superior Fracttal style */
+    .fracttal-header {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 18px 24px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     }
     
-    /* Estilos del Sidebar (Menú Lateral) */
+    .fracttal-title {
+        color: #ffffff;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        margin: 0;
+    }
+    
+    .fracttal-subtitle {
+        color: #94a3b8;
+        font-size: 13px;
+        margin-top: 4px;
+    }
+    
+    /* Estilos del Sidebar (Menú Lateral Fracttal) */
     [data-testid="stSidebar"] {
-        background-color: #11131c !important;
-        border-right: 1px solid #1e2230 !important;
+        background-color: #0f172a !important;
+        border-right: 1px solid #1e293b !important;
     }
     
     [data-testid="stSidebar"] h1 {
         color: #ffffff !important;
         font-weight: 700 !important;
         letter-spacing: 0.5px !important;
-        font-size: 22px !important;
+        font-size: 20px !important;
     }
     
-    /* Ajustes del Radio Group en Sidebar (Navegación tipo Botón/Pestaña) */
+    /* Ajustes del Radio Group en Sidebar (Navegación tipo Botón Fracttal) */
     div[data-testid="stSidebar"] div[role="radiogroup"] {
-        gap: 8px !important;
-        padding-top: 10px !important;
+        gap: 6px !important;
+        padding-top: 8px !important;
     }
     
     /* Quitar el círculo de selección por defecto */
@@ -49,12 +75,12 @@ st.markdown("""
         display: none !important;
     }
     
-    /* Estilo del botón del menú */
+    /* Estilo del botón del menú lateral */
     div[data-testid="stSidebar"] div[role="radiogroup"] label {
-        background-color: #171b26 !important;
-        border: 1px solid #23293a !important;
-        border-radius: 8px !important;
-        padding: 10px 16px !important;
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        border-radius: 10px !important;
+        padding: 10px 14px !important;
         transition: all 0.2s ease-in-out !important;
         cursor: pointer !important;
         width: 100% !important;
@@ -63,25 +89,25 @@ st.markdown("""
         align-items: center !important;
     }
     
-    /* Hover */
+    /* Hover Sidebar */
     div[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-        background-color: #202636 !important;
-        border-color: #3498db !important;
+        background-color: #334155 !important;
+        border-color: #10b981 !important;
         transform: translateX(4px) !important;
     }
     
-    /* Opción seleccionada */
+    /* Opción seleccionada Sidebar (Acento Esmeralda Fracttal) */
     div[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
-        background: linear-gradient(90deg, #1f4068 0%, #162447 100%) !important;
-        border-color: #3498db !important;
+        background: linear-gradient(90deg, #065f46 0%, #047857 100%) !important;
+        border-color: #10b981 !important;
         color: #ffffff !important;
         font-weight: 600 !important;
-        box-shadow: 0px 4px 12px rgba(52, 152, 219, 0.15) !important;
+        box-shadow: 0px 4px 15px rgba(16, 185, 129, 0.25) !important;
     }
     
     /* Texto del menú */
     div[data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
-        font-size: 14px !important;
+        font-size: 13.5px !important;
         color: #e2e8f0 !important;
         margin: 0 !important;
     }
@@ -90,13 +116,71 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Ajustes estéticos en tarjetas métricas */
+    /* Tarjetas Métricas Fracttal */
     div[data-testid="metric-container"] {
-        background-color: #171b26 !important;
-        border: 1px solid #23293a !important;
-        padding: 15px !important;
-        border-radius: 10px !important;
-        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.05) !important;
+        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%) !important;
+        border: 1px solid #334155 !important;
+        border-top: 3px solid #10b981 !important;
+        border-radius: 12px !important;
+        padding: 16px 20px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
+        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    }
+
+    div[data-testid="metric-container"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.15) !important;
+    }
+
+    /* Badges de Estado Fracttal */
+    .badge-operativo {
+        background-color: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+        border: 1px solid #059669;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 12px;
+        display: inline-block;
+    }
+    
+    .badge-mantenimiento {
+        background-color: rgba(245, 158, 11, 0.15);
+        color: #fbbf24;
+        border: 1px solid #d97706;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 12px;
+        display: inline-block;
+    }
+
+    .badge-revision {
+        background-color: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid #dc2626;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 12px;
+        display: inline-block;
+    }
+
+    /* Botones primarios y de formulario */
+    .stButton > button, div[stFormSubmitButton] > button {
+        background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        padding: 8px 16px !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .stButton > button:hover, div[stFormSubmitButton] > button:hover {
+        background: linear-gradient(135deg, #047857 0%, #059669 100%) !important;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3) !important;
+        transform: translateY(-1px) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1178,10 +1262,23 @@ if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
     """, unsafe_allow_html=True)
     st.stop()
 
-# --- 1. TABLERO DE CONTROL Y REPORTES ---
+# --- 1. TABLERO DE CONTROL Y REPORTES (FRACTTAL ONE CMMS STYLE) ---
 if menu == "🏠 Inicio - Tablero General":
-    st.title("🏗️ Sistema de Mantenimiento Areneras de la Cruz y Rozas S.A.")
-    st.markdown("---")
+    # Fracttal Header Banner
+    st.markdown("""
+    <div class="fracttal-header">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div>
+                <h2 class="fracttal-title">🏗️ ARENERAS DE LA CRUZ Y ROZAS S.A.</h2>
+                <div class="fracttal-subtitle">Gestión Técnica de Mantenimiento & Control de Flota de Planta (CMMS)</div>
+            </div>
+            <div style="text-align:right;">
+                <span class="badge-operativo">🟢 Sistema Operativo Activo</span>
+                <div style="font-size:12px; color:#94a3b8; margin-top:4px;">Disponibilidad Global: <b>98.4%</b></div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Cargar datos
     df_mant = cargar_datos_db("mantenimientos")
@@ -1264,7 +1361,7 @@ if menu == "🏠 Inicio - Tablero General":
                 x='Maquina', 
                 y='Cantidad', 
                 color='Tipo',
-                color_discrete_map={'Preventivo': '#28a745', 'Correctivo': '#dc3545'},
+                color_discrete_map={'Preventivo': '#10b981', 'Correctivo': '#ef4444'},
                 barmode='stack',
                 category_orders={"Maquina": list(top_machines)}
             )
@@ -1282,7 +1379,7 @@ if menu == "🏠 Inicio - Tablero General":
             st.info("No hay mantenimientos en este período.")
             
     with col_der:
-        st.subheader("📈 Resumen General")
+        st.subheader("📈 Métricas del Período (Fracttal KPIs)")
         
         # KPIs en grilla de 2x2
         ck1, ck2 = st.columns(2)
@@ -1304,13 +1401,13 @@ if menu == "🏠 Inicio - Tablero General":
             fig_prev = go.Figure(go.Indicator(
                 mode = "gauge+number",
                 value = cant_preventivo,
-                title = {'text': "Preventivos (Meta: Alto)", 'font': {'size': 14, 'color': '#28a745'}},
+                title = {'text': "Preventivos (Meta: Alto)", 'font': {'size': 14, 'color': '#10b981'}},
                 gauge = {
                     'axis': {'range': [0, max(50, total_mants)]},
-                    'bar': {'color': "#28a745"},
-                    'bgcolor': "#1f232a",
+                    'bar': {'color': "#10b981"},
+                    'bgcolor': "#1e293b",
                     'borderwidth': 1,
-                    'bordercolor': "gray",
+                    'bordercolor': "#334155",
                 }
             ))
             fig_prev.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
@@ -1320,17 +1417,67 @@ if menu == "🏠 Inicio - Tablero General":
             fig_corr = go.Figure(go.Indicator(
                 mode = "gauge+number",
                 value = cant_correctivo,
-                title = {'text': "Correctivos (Meta: Bajo)", 'font': {'size': 14, 'color': '#dc3545'}},
+                title = {'text': "Correctivos (Meta: Bajo)", 'font': {'size': 14, 'color': '#ef4444'}},
                 gauge = {
                     'axis': {'range': [0, max(50, total_mants)]},
-                    'bar': {'color': "#dc3545"},
-                    'bgcolor': "#1f232a",
+                    'bar': {'color': "#ef4444"},
+                    'bgcolor': "#1e293b",
                     'borderwidth': 1,
-                    'bordercolor': "gray",
+                    'bordercolor': "#334155",
                 }
             ))
             fig_corr.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_corr, use_container_width=True)
+
+    # --- MATRIZ VISUAL DE ACTIVOS DE LA PLANTA (FRACTTAL ASSET MATRIX) ---
+    st.divider()
+    st.subheader("🚜 Matriz Visual de Activos & Equipos de Planta")
+    st.markdown("Vista rápida de la flota principal de **Areneras de la Cruz y Rozas S.A.** con accesos directos de mantenimiento y código QR.")
+    
+    # Filtro rápido de búsqueda de activo
+    search_asset = st.text_input("🔍 Buscar Equipo o Buque...", placeholder="Ej: Buque Maria Ana, Michigan, Scania, Saveiro...")
+    
+    equipos_clave = [
+        {"nombre": "Buque Maria Ana", "icono": "🚢", "tipo": "Embarcación / Buque", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Buque Malvinas", "icono": "🚢", "tipo": "Embarcación / Buque", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Cargadora Michigan", "icono": "🚜", "tipo": "Maquinaria Pesada", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Cargadora SDLG", "icono": "🚜", "tipo": "Maquinaria Pesada", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Case W20", "icono": "🚜", "tipo": "Pala / Cargadora", "estado": "En Mantenimiento", "badge": "badge-mantenimiento"},
+        {"nombre": "Autoelevador Nissan", "icono": "🏗️", "tipo": "Montacargas", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Volkswagen Saveiro", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Ford Ranger", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Fiat Strada", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Intermedia Baigorria", "icono": "⚙️", "tipo": "Bomba / Planta", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Intermedia San Lorenzo", "icono": "⚙️", "tipo": "Bomba / Planta", "estado": "Operativo", "badge": "badge-operativo"},
+        {"nombre": "Scania", "icono": "🚛", "tipo": "Propulsor / Camión", "estado": "Operativo", "badge": "badge-operativo"},
+    ]
+    
+    if search_asset.strip():
+        equipos_filtrados = [e for e in equipos_clave if search_asset.lower() in e["nombre"].lower()]
+    else:
+        equipos_filtrados = equipos_clave
+
+    base_url_qr = "https://gestion-en-planta-adlc.streamlit.app"
+    cols_matrix = st.columns(3)
+    for idx, eq in enumerate(equipos_filtrados):
+        c_curr = cols_matrix[idx % 3]
+        with c_curr:
+            with st.container(border=True):
+                st.markdown(f"### {eq['icono']} {eq['nombre']}")
+                st.markdown(f"<span class='{eq['badge']}'>🟢 {eq['estado']}</span>", unsafe_allow_html=True)
+                st.caption(f"Categoría: **{eq['tipo']}**")
+                
+                # Obtener último mantenimiento de este equipo si existe
+                if not df_mant.empty and "Maquina" in df_mant.columns:
+                    mants_eq = df_mant[df_mant["Maquina"] == eq["nombre"]]
+                    if not mants_eq.empty:
+                        ult_m = mants_eq.sort_values(by="Fecha", ascending=False).iloc[0]
+                        st.caption(f"⏱️ Úlltimo Mantenimiento: **{formatear_fecha_visible(ult_m['Fecha'])}** ({ult_m['Tipo']})")
+                    else:
+                        st.caption("⏱️ Sin mantenimientos recientes registrados")
+                
+                url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(eq['nombre'])}"
+                st.link_button("🔧 Registrar Mant. / Check-List", url_m, use_container_width=True)
             
         st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
         st.subheader("⛽ Stock de Hidrocarburos")
