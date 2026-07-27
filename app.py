@@ -129,7 +129,7 @@ def generar_pdf_hidrocarburos(df_reporte, filtro_prod_str, filtro_mov_str, filtr
         def header(self):
             self.set_font('Helvetica', 'B', 14)
             self.set_text_color(22, 36, 71)
-            self.cell(0, 8, 'CRUZ Y ROZAS S.A.', new_x='LMARGIN', new_y='NEXT', align='C')
+            self.cell(0, 8, 'Areneras de la Cruz y Rozas S.A.', new_x='LMARGIN', new_y='NEXT', align='C')
             self.set_font('Helvetica', 'B', 10)
             self.set_text_color(100, 100, 100)
             self.cell(0, 6, 'Gestion de Planta - Reporte de Movimientos de Hidrocarburos', new_x='LMARGIN', new_y='NEXT', align='C')
@@ -142,7 +142,7 @@ def generar_pdf_hidrocarburos(df_reporte, filtro_prod_str, filtro_mov_str, filtr
             self.set_y(-15)
             self.set_font('Helvetica', 'I', 8)
             self.set_text_color(120, 120, 120)
-            self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Cruz y Rozas S.A.', align='C')
+            self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Areneras de la Cruz y Rozas S.A.', align='C')
 
     pdf = PDF()
     pdf.alias_nb_pages()
