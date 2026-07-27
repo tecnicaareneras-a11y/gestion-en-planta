@@ -804,7 +804,7 @@ def mostrar_registro_rapido_qr(maquina_qr):
     
     # Obtener base_url para links
     config_file = "config_url.json"
-    base_url = "http://localhost:8501"
+    base_url = "https://gestion-en-planta-adlc.streamlit.app"
     if os.path.exists(config_file):
         try:
             with open(config_file, "r") as f:
@@ -2119,27 +2119,26 @@ elif menu == "⚙️ Configuración":
                         st.rerun()
                     
             st.divider()
-            st.subheader("📋 Generar Código QR")
+            st.subheader("📋 Generación de Códigos QR para Máquinas")
         
-            # Cargar URL externa guardada
             import json
             config_file = "config_url.json"
-            url_externa_previa = ""
+            url_externa_previa = "https://gestion-en-planta-adlc.streamlit.app"
             if os.path.exists(config_file):
                 try:
                     with open(config_file, "r") as f:
                         data = json.load(f)
-                        url_externa_previa = data.get("url_externa", "")
+                        if data.get("url_externa", "").strip():
+                            url_externa_previa = data.get("url_externa", "").strip()
                 except:
                     pass
                 
             url_externa = st.text_input(
-                "🌐 URL de Acceso Externo (Opcional)", 
+                "🌐 URL Base de la Aplicación (Dominio en la Nube)", 
                 value=url_externa_previa, 
-                placeholder="Ej: https://areneras.ngrok-free.app o https://areneras.loca.lt"
+                placeholder="Ej: https://gestion-en-planta-adlc.streamlit.app"
             )
         
-            # Guardar si cambió
             if url_externa != url_externa_previa:
                 try:
                     with open(config_file, "w") as f:
@@ -2147,43 +2146,36 @@ elif menu == "⚙️ Configuración":
                 except:
                     pass
                 
+            base_url_qr = url_externa.strip().rstrip("/") if url_externa.strip() else "https://gestion-en-planta-adlc.streamlit.app"
+
             if maquinas_list:
+                st.markdown("##### 📌 Generar QR de una Máquina Individual")
                 m_qr = st.selectbox("Seleccionar Máquina para QR", ["-- Seleccionar --"] + maquinas_list)
                 if m_qr != "-- Seleccionar --":
-                    # Determinar URL base
-                    if url_externa.strip():
-                        base_url = url_externa.strip().rstrip("/")
-                    else:
-                        def obtener_ip_local():
-                            try:
-                                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                                s.connect(("8.8.8.8", 80))
-                                ip = s.getsockname()[0]
-                                s.close()
-                                return ip
-                            except:
-                                return "localhost"
-                        ip_local = obtener_ip_local()
-                        base_url = f"http://{ip_local}:8501"
-                    
-                    url_qr = f"{base_url}/?qr_maq={urllib.parse.quote(m_qr)}"
-                    api_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(url_qr)}"
+                    url_qr = f"{base_url_qr}/?qr_maq={urllib.parse.quote(m_qr)}"
+                    api_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_qr)}"
                 
-                    st.image(api_qr, caption=f"Código QR: {m_qr}")
-                    st.write(f"🔗 **Enlace QR:** `{url_qr}`")
-                    st.info("💡 Pegue este código en la máquina física. Los técnicos podrán escanearlo desde sus celulares con redes móviles (4G/5G) o cualquier red de internet.")
+                    col_q1, col_q2 = st.columns([1, 2])
+                    with col_q1:
+                        st.image(api_qr, caption=f"QR: {m_qr}")
+                    with col_q2:
+                        st.markdown(f"#### 🚜 **{m_qr}**")
+                        st.write(f"🔗 **Enlace QR:** `{url_qr}`")
+                        st.success("💡 **Instrucciones:** Imprimí o pegá este QR en la máquina. Cualquier operario que lo escanee desde su celular podrá registrar el mantenimiento o el check-list diario de este equipo al instante.")
                 
-                    st.markdown("""
-                    > **¿Cómo configurar el acceso desde internet (redes móviles / 4G)?**
-                    >
-                    > Como la base de datos y la aplicación corren en tu computadora, para que un celular con datos móviles (fuera de la red de la planta) acceda, se debe crear un túnel a internet:
-                    >
-                    > 1. Abre la consola de Windows y ejecuta:
-                    >    `npx localtunnel --port 8501` o `ngrok http 8501`.
-                    > 2. Copia la dirección web pública que te brinde (ej: `https://areneras-la-cruz.loca.lt`).
-                    > 3. Pégala en el campo **URL de Acceso Externo** de arriba.
-                    > 4. Los códigos QR que generes usarán esa dirección y funcionarán en cualquier parte del mundo.
-                    """)
+                st.divider()
+                st.markdown("##### 🖨️ Grilla de Códigos QR de Toda la Planta (Imprimible)")
+                if st.checkbox("👁️ Mostrar todos los QR de máquinas juntas para imprimir"):
+                    cols_qr = st.columns(3)
+                    for idx, maq_name in enumerate(maquinas_list):
+                        col_curr = cols_qr[idx % 3]
+                        with col_curr:
+                            with st.container(border=True):
+                                url_maq_item = f"{base_url_qr}/?qr_maq={urllib.parse.quote(maq_name)}"
+                                api_qr_item = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={urllib.parse.quote(url_maq_item)}"
+                                st.markdown(f"**🚜 {maq_name}**")
+                                st.image(api_qr_item, use_container_width=True)
+                                st.caption(f"Escanear para {maq_name}")
 
         with col2:
             st.subheader("👤 Personal")
