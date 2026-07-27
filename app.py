@@ -952,6 +952,53 @@ def mostrar_checklist_diario_qr(maquina_qr, titulo_vis=True):
                 st.balloons()
                 st.info("Ya puede cerrar esta pestaña en su teléfono.")
 
+def mostrar_registro_hidro_qr(prod_pre=None):
+    st.title("⛽ Carga de Hidrocarburos por Código QR")
+    st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
+    st.markdown("---")
+    
+    empleados_list_db = cargar_lista_columna("empleados", "Nombre")
+    maquinas_list_db = cargar_lista_columna("maquinas", "Nombre")
+    hidro_list_db = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
+    
+    usuario_logueado = st.session_state.get("usuario", "")
+    indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
+    
+    idx_prod = None
+    if prod_pre and prod_pre in hidro_list_db:
+        idx_prod = hidro_list_db.index(prod_pre)
+        
+    with st.form("form_hidro_qr"):
+        c1, c2 = st.columns(2)
+        movimiento = c1.selectbox("Movimiento", ["Egreso", "Ingreso"])
+        producto = c1.selectbox("Tipo de Hidrocarburo", hidro_list_db, index=idx_prod, placeholder="Escribe para buscar tipo...")
+        cantidad = c2.number_input("Cantidad (Litros)", min_value=0.0, step=1.0)
+        destino = c2.selectbox("Destino", ["Stock Central"] + maquinas_list_db, index=None, placeholder="Escribe para buscar destino...")
+        operario = st.selectbox("Responsable / Técnico", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar responsable...")
+        
+        btn_guardar = st.form_submit_button("💾 Cargar Registro de Hidrocarburos", use_container_width=True)
+        if btn_guardar:
+            if not producto:
+                st.error("⚠️ Por favor selecciona el tipo de hidrocarburo.")
+            elif not destino:
+                st.error("⚠️ Por favor selecciona el destino.")
+            elif not operario:
+                st.error("⚠️ Por favor selecciona el responsable.")
+            elif cantidad <= 0:
+                st.error("⚠️ Por favor ingresa una cantidad de litros mayor a 0.")
+            else:
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (datetime.now().strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario))
+                conn.commit()
+                conn.close()
+                st.success("🎉 ¡Registro de Hidrocarburos guardado con éxito!")
+                st.balloons()
+                st.info("Ya puede continuar cargando o cerrar la ventana en su teléfono.")
+
 # --- EVALUAR PARÁMETROS DE QUERY (ARRANQUE DE FICHA O REGISTRO QR) ---
 query_params = st.query_params
 if "id" in query_params:
@@ -969,6 +1016,10 @@ elif "qr_maq" in query_params:
 elif "qr_checklist" in query_params:
     maquina_qr = query_params["qr_checklist"]
     mostrar_checklist_diario_qr(maquina_qr)
+    st.stop()
+elif "qr_hidro" in query_params:
+    prod_hidro = query_params["qr_hidro"] if query_params["qr_hidro"] != "1" else None
+    mostrar_registro_hidro_qr(prod_hidro)
     st.stop()
 
 # Carga de listas para menús desplegables
@@ -2163,6 +2214,21 @@ elif menu == "⚙️ Configuración":
                                 st.markdown(f"**🚜 {maq_name}**")
                                 st.image(api_qr_item, use_container_width=True)
                                 st.caption(f"Escanear para {maq_name}")
+
+            st.divider()
+            st.subheader("⛽ Código QR para Control de Hidrocarburos")
+            st.markdown("Imprimí y pegá este código QR en la estación de carga, surtidores o área de lubricantes. Los operarios podrán escanearlo desde sus celulares para registrar cargas de combustible y aceites en tiempo real.")
+            
+            url_qr_hidro = f"{base_url_qr}/?qr_hidro=1"
+            api_qr_hidro = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_qr_hidro)}"
+            
+            col_hq1, col_hq2 = st.columns([1, 2])
+            with col_hq1:
+                st.image(api_qr_hidro, caption="QR Surtidor de Hidrocarburos")
+            with col_hq2:
+                st.markdown("#### ⛽ **QR Surtidor / Estación de Servicio**")
+                st.write(f"🔗 **Enlace QR:** `{url_qr_hidro}`")
+                st.success("💡 **Instrucciones:** Al escanear este QR con cualquier celular, se abrirá el formulario directo para registrar Ingresos y Egresos de Gas-oil, Aceite Motor, Hidráulico o Grasa.")
 
         with col2:
             st.subheader("👤 Personal")
