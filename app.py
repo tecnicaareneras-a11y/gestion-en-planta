@@ -1,0 +1,2388 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import sqlite3
+import os
+from io import BytesIO
+import socket
+import urllib.parse
+
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Gestión de Planta", layout="wide")
+
+# --- INYECCIÓN DE ESTILOS CSS PERSONALIZADOS (DISEÑO PREMIUM Y FUENTES MODERNAS) ---
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+    
+    /* Configurar Fuente Global */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        font-family: 'Outfit', sans-serif !important;
+    }
+    
+    /* Aplicar a elementos de texto específicos sin romper iconos */
+    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, .stMetric, button div, div[role="radiogroup"] label {
+        font-family: 'Outfit', sans-serif !important;
+    }
+    
+    /* Estilos del Sidebar (Menú Lateral) */
+    [data-testid="stSidebar"] {
+        background-color: #11131c !important;
+        border-right: 1px solid #1e2230 !important;
+    }
+    
+    [data-testid="stSidebar"] h1 {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+        font-size: 22px !important;
+    }
+    
+    /* Ajustes del Radio Group en Sidebar (Navegación tipo Botón/Pestaña) */
+    div[data-testid="stSidebar"] div[role="radiogroup"] {
+        gap: 8px !important;
+        padding-top: 10px !important;
+    }
+    
+    /* Quitar el círculo de selección por defecto */
+    div[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+        display: none !important;
+    }
+    
+    /* Estilo del botón del menú */
+    div[data-testid="stSidebar"] div[role="radiogroup"] label {
+        background-color: #171b26 !important;
+        border: 1px solid #23293a !important;
+        border-radius: 8px !important;
+        padding: 10px 16px !important;
+        transition: all 0.2s ease-in-out !important;
+        cursor: pointer !important;
+        width: 100% !important;
+        margin-bottom: 2px !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    
+    /* Hover */
+    div[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+        background-color: #202636 !important;
+        border-color: #3498db !important;
+        transform: translateX(4px) !important;
+    }
+    
+    /* Opción seleccionada */
+    div[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
+        background: linear-gradient(90deg, #1f4068 0%, #162447 100%) !important;
+        border-color: #3498db !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        box-shadow: 0px 4px 12px rgba(52, 152, 219, 0.15) !important;
+    }
+    
+    /* Texto del menú */
+    div[data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
+        font-size: 14px !important;
+        color: #e2e8f0 !important;
+        margin: 0 !important;
+    }
+    
+    div[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] div[data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important;
+    }
+    
+    /* Ajustes estéticos en tarjetas métricas */
+    div[data-testid="metric-container"] {
+        background-color: #171b26 !important;
+        border: 1px solid #23293a !important;
+        padding: 15px !important;
+        border-radius: 10px !important;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.05) !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def formatear_fecha_visible(fecha_str):
+    if not fecha_str or str(fecha_str).strip() == 'nan' or str(fecha_str).strip() == '':
+        return ""
+    try:
+        dt = pd.to_datetime(fecha_str)
+        return dt.strftime("%d/%m/%Y")
+    except:
+        return str(fecha_str)
+
+def formatear_fecha_hora_visible(fechahora_str):
+    if not fechahora_str or str(fechahora_str).strip() == 'nan' or str(fechahora_str).strip() == '':
+        return ""
+    try:
+        dt = pd.to_datetime(fechahora_str)
+        return dt.strftime("%d/%m/%Y %H:%M:%S")
+    except:
+        return str(fechahora_str)
+
+def buscar_coincidencia_empleado(usuario, lista_empleados):
+    if not usuario or not lista_empleados:
+        return None
+    import unicodedata
+    
+    def normalizar(t):
+        if not t:
+            return ""
+        # Reemplazar caracteres no alfanuméricos (incluyendo codificación rota) por espacios
+        t_clean = ""
+        for c in str(t):
+            if c.isalnum() or c.isspace():
+                t_clean += c
+            else:
+                t_clean += " "
+        # Normalizar caracteres unicode, quitar acentos y pasar a minúsculas
+        norm_t = unicodedata.normalize('NFKD', t_clean).encode('ASCII', 'ignore').decode('utf-8').lower()
+        return norm_t.strip()
+
+    usuario_norm = normalizar(usuario)
+    usuario_words = [w for w in usuario_norm.split() if len(w) >= 3] # Palabras de 3 o más letras
+    
+    if not usuario_words:
+        return None
+
+    mejor_idx = None
+    max_coincidencias = 0
+
+    for i, emp in enumerate(lista_empleados):
+        emp_norm = normalizar(emp)
+        emp_words = [w for w in emp_norm.split() if len(w) >= 3]
+        
+        # 1. Coincidencia exacta
+        if usuario_norm == emp_norm:
+            return i
+            
+        # 2. Contar palabras coincidentes
+        coincidencias = 0
+        for uw in usuario_words:
+            if uw in emp_words:
+                coincidencias += 1
+            else:
+                # Comprobación de prefijo/sufijo para tolerar errores de codificación (ej: "nstor" vs "nestor")
+                for ew in emp_words:
+                    if len(uw) >= 4 and len(ew) >= 4:
+                        if uw in ew or ew in uw:
+                            coincidencias += 1
+                            break
+                            
+        # Guardar la mejor coincidencia encontrada
+        if coincidencias > max_coincidencias:
+            max_coincidencias = coincidencias
+            mejor_idx = i
+            
+    # Si encontramos al menos una palabra clave coincidente (como el apellido), es válido
+    if max_coincidencias >= 1:
+        return mejor_idx
+        
+    return None
+
+DB_FILE = "gestion_planta.db"
+
+# --- CONEXIÓN Y CREACIÓN DE TABLAS SQLITE ---
+def get_connection():
+    # timeout=20.0 evita errores de bloqueo en escrituras concurrentes
+    return sqlite3.connect(DB_FILE, timeout=20.0)
+
+def init_db():
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Crear tablas si no existen con las columnas originales capitalizadas
+    cursor.execute("CREATE TABLE IF NOT EXISTS maquinas (Nombre TEXT PRIMARY KEY)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS empleados (Nombre TEXT PRIMARY KEY)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS productos (Nombre TEXT PRIMARY KEY)")
+    
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS mantenimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Fecha TEXT,
+        Maquina TEXT,
+        Operario TEXT,
+        Tipo TEXT,
+        Inicio TEXT,
+        Fin TEXT,
+        Horimetro REAL,
+        Detalle TEXT,
+        Deposito TEXT,
+        FechaCreacion TEXT,
+        HistorialModificaciones TEXT
+    )
+    """)
+    
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS planificacion (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Maquina TEXT,
+        Tarea TEXT,
+        Fecha_Prog TEXT,
+        Estado TEXT,
+        Fecha_Fin TEXT,
+        Tecnico TEXT
+    )
+    """)
+    
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS stock (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Fecha TEXT,
+        Producto TEXT,
+        Movimiento TEXT,
+        Cantidad REAL,
+        Destino TEXT
+    )
+    """)
+    
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS hidrocarburos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Fecha TEXT,
+        Producto TEXT,
+        Movimiento TEXT,
+        Cantidad REAL,
+        Destino TEXT,
+        Operario TEXT
+    )
+    """)
+    
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS controles_diarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Fecha TEXT,
+        Maquina TEXT,
+        Tecnico TEXT,
+        Deposito TEXT,
+        Horimetro_KM TEXT,
+        I_a_perdidas TEXT,
+        I_b_aceite_motor TEXT,
+        I_c_agua_motor TEXT,
+        I_d_tension_correa TEXT,
+        I_e_presion_cubiertas TEXT,
+        I_f_correa_bba_arena TEXT,
+        I_g_acople_embrague TEXT,
+        II_a_tablero TEXT,
+        II_b_sirena_luces TEXT,
+        II_c_embrague_vacio TEXT,
+        III_a_mangueras_rad TEXT,
+        III_b_temp_rodamientos TEXT,
+        IV_a_engrase_balde TEXT,
+        IV_b_engrase_torre TEXT,
+        Observaciones TEXT
+    )
+    """)
+    
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS usuarios (
+        Usuario TEXT PRIMARY KEY,
+        Password TEXT,
+        Token TEXT,
+        Rol TEXT,
+        Puesto TEXT
+    )
+    """)
+    
+    # Asegurar que haya al menos un usuario admin inicial
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    if cursor.fetchone()[0] == 0:
+        import uuid
+        default_token = uuid.uuid4().hex
+        cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto) VALUES (?, ?, ?, ?, ?)",
+                       ("admin", "admin", default_token, "Administrador", "Administrador del Sistema"))
+        conn.commit()
+
+    # Asegurar que existan los 5 equipos base en el catálogo de máquinas
+    for maq in ["Scania", "Case W20", "Michigan 75", "Toyota 1", "Toyota 2"]:
+        cursor.execute("INSERT OR IGNORE INTO maquinas (Nombre) VALUES (?)", (maq,))
+    conn.commit()
+
+    # Asegurar que exista la columna Puesto en usuarios si la tabla ya existe
+    cursor.execute("PRAGMA table_info(usuarios)")
+    columnas_usr = [row[1] for row in cursor.fetchall()]
+    if "Puesto" not in columnas_usr:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN Puesto TEXT")
+    
+    # Asegurar que existan las nuevas columnas en mantenimientos si ya existe la tabla
+    cursor.execute("PRAGMA table_info(mantenimientos)")
+    columnas = [row[1] for row in cursor.fetchall()]
+    if "FechaCreacion" not in columnas:
+        cursor.execute("ALTER TABLE mantenimientos ADD COLUMN FechaCreacion TEXT")
+    if "HistorialModificaciones" not in columnas:
+        cursor.execute("ALTER TABLE mantenimientos ADD COLUMN HistorialModificaciones TEXT")
+    if "CreadoPor" not in columnas:
+        cursor.execute("ALTER TABLE mantenimientos ADD COLUMN CreadoPor TEXT")
+        
+    # Asegurar que existan las nuevas columnas en controles_diarios si ya existe la tabla
+    cursor.execute("PRAGMA table_info(controles_diarios)")
+    columnas_cd = [row[1] for row in cursor.fetchall()]
+    if "CreadoPor" not in columnas_cd:
+        cursor.execute("ALTER TABLE controles_diarios ADD COLUMN CreadoPor TEXT")
+        
+    # Inicializar registros antiguos con valores por defecto
+    cursor.execute("UPDATE mantenimientos SET FechaCreacion = Fecha || ' 00:00:00' WHERE FechaCreacion IS NULL")
+    cursor.execute("UPDATE mantenimientos SET HistorialModificaciones = 'Importado desde Excel.' WHERE HistorialModificaciones IS NULL")
+    
+    conn.commit()
+    
+    # --- MIGRACIÓN AUTOMÁTICA DE CSV EXISTENTES A SQLITE ---
+    csv_files = {
+        "db_maquinas.csv": "maquinas",
+        "db_empleados.csv": "empleados",
+        "db_productos.csv": "productos",
+        "reg_mantenimientos.csv": "mantenimientos",
+        "reg_planificacion.csv": "planificacion",
+        "reg_stock.csv": "stock",
+        "reg_hidrocarburos.csv": "hidrocarburos"
+    }
+    
+    migrated = False
+    for csv_file, table in csv_files.items():
+        if os.path.exists(csv_file):
+            try:
+                # Leer el archivo CSV
+                df = pd.read_csv(csv_file)
+                if not df.empty:
+                    # Limpieza de nulos o diferencias de columnas
+                    if table == "mantenimientos":
+                        # Asegurar que todas las columnas existan
+                        for col in ["Fecha", "Maquina", "Operario", "Tipo", "Inicio", "Fin", "Horimetro", "Detalle", "Deposito", "FechaCreacion", "HistorialModificaciones"]:
+                            if col not in df.columns:
+                                df[col] = ""
+                    # Insertar a la base de datos sin incluir el índice
+                    df.to_sql(table, conn, if_exists="append", index=False)
+                    migrated = True
+                
+                # Mover el archivo migrado a la carpeta Back-up para evitar volver a migrarlo
+                backup_dir = "Back-up"
+                if not os.path.exists(backup_dir):
+                    os.makedirs(backup_dir)
+                
+                # Si ya existe un archivo con el mismo nombre en Back-up, lo renombramos con timestamp
+                dest_path = os.path.join(backup_dir, csv_file)
+                if os.path.exists(dest_path):
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    dest_path = os.path.join(backup_dir, f"{timestamp}_{csv_file}")
+                
+                os.rename(csv_file, dest_path)
+            except Exception as e:
+                # Si falla la migración de un archivo particular, lo reportamos internamente
+                st.error(f"No se pudo migrar el archivo {csv_file}: {e}")
+                
+    if migrated:
+        conn.commit()
+    conn.close()
+
+# Inicializar Base de Datos al arrancar la app y migrar datos antiguos
+init_db()
+
+# --- EVALUAR AUTENTICACIÓN ---
+if "usuario" not in st.session_state:
+    st.session_state["usuario"] = None
+if "token" not in st.session_state:
+    st.session_state["token"] = None
+
+# A. Leer cookies de la solicitud HTTP
+def get_cookies():
+    # 1. Intentar con st.context.cookies (Streamlit moderno 1.36+)
+    try:
+        if hasattr(st, "context") and hasattr(st.context, "cookies"):
+            return st.context.cookies
+    except:
+        pass
+        
+    # 2. Intentar con st.context.headers (Streamlit 1.36+)
+    try:
+        if hasattr(st, "context") and hasattr(st.context, "headers"):
+            cookie_str = st.context.headers.get("Cookie", "")
+            if cookie_str:
+                cookies = {}
+                for item in cookie_str.split(";"):
+                    item = item.strip()
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        cookies[k] = urllib.parse.unquote(v)
+                return cookies
+    except:
+        pass
+
+    # 3. Fallback a WebSocket headers internos (versiones anteriores)
+    try:
+        from streamlit.web.server.websocket_headers import _get_websocket_headers
+        headers = _get_websocket_headers()
+        if headers:
+            cookie_str = headers.get("Cookie", "")
+            cookies = {}
+            if cookie_str:
+                for item in cookie_str.split(";"):
+                    item = item.strip()
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        cookies[k] = urllib.parse.unquote(v)
+            return cookies
+    except:
+        pass
+    return {}
+
+cookies_dict = get_cookies()
+print("DEBUG - Cookies recibidas del navegador:", cookies_dict)
+usr_cookie = cookies_dict.get("planta_usr")
+tkn_cookie = cookies_dict.get("planta_tkn")
+
+# Validar cookies si no hay sesión activa en st.session_state
+if not st.session_state["usuario"] and usr_cookie and tkn_cookie:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT Usuario, Rol, Puesto FROM usuarios WHERE Usuario = ? AND Token = ?", (usr_cookie, tkn_cookie))
+    match = cursor.fetchone()
+    conn.close()
+    if match:
+        st.session_state["usuario"] = match[0]
+        st.session_state["token"] = tkn_cookie
+        st.session_state["rol"] = match[1]
+        st.session_state["puesto"] = match[2]
+
+# B. Leer parámetros de query (si no se pudo validar por cookies directamente)
+if not st.session_state["usuario"]:
+    q_params = st.query_params
+    if "usr" in q_params and "tkn" in q_params:
+        u_param = q_params["usr"]
+        t_param = q_params["tkn"]
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT Usuario FROM usuarios WHERE Usuario = ? AND Token = ?", (u_param, t_param))
+        match = cursor.fetchone()
+        conn.close()
+        if match:
+            st.session_state["usuario"] = match[0]
+            st.session_state["token"] = t_param
+            st.session_state["rol"] = match[1]
+            st.session_state["puesto"] = match[2]
+            # Guardar tanto en cookies como en localStorage para redundancia absoluta (codificado para soportar espacios/acentos)
+            import time
+            rand_t = time.time()
+            st.markdown(f"""
+            <img src="x?r={rand_t}" onerror="
+            document.cookie = 'planta_usr=' + encodeURIComponent('{match[0]}') + '; path=/; max-age=31536000; SameSite=Lax; Secure';
+            document.cookie = 'planta_tkn=' + encodeURIComponent('{t_param}') + '; path=/; max-age=31536000; SameSite=Lax; Secure';
+            localStorage.setItem('planta_usr', '{match[0]}');
+            localStorage.setItem('planta_tkn', '{t_param}');
+            " style="display:none;">
+            """, unsafe_allow_html=True)
+        else:
+            # Token inválido, limpiar de la URL para evitar bucles
+            st.query_params.clear()
+
+# C. Recuperar token y roles si hay sesión activa pero no se cargaron en la memoria temporal
+if st.session_state["usuario"] and (not st.session_state["token"] or "rol" not in st.session_state or not st.session_state["rol"]):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT Token, Rol, Puesto FROM usuarios WHERE Usuario = ?", (st.session_state["usuario"],))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        st.session_state["token"] = row[0]
+        st.session_state["rol"] = row[1]
+        st.session_state["puesto"] = row[2]
+
+# D. Si no hay sesión activa (no se detectó cookie ni query param), verificar en localStorage
+if not st.session_state["usuario"]:
+    import time
+    rand_t = time.time()
+    st.markdown("""
+    <img src="x?r=""" + str(rand_t) + """\" onerror="
+    const usr = localStorage.getItem('planta_usr');
+    const tkn = localStorage.getItem('planta_tkn');
+    if (usr && tkn) {
+        const url = new URL(window.location.href);
+        if (!url.searchParams.has('usr') || !url.searchParams.has('tkn')) {
+            url.searchParams.set('usr', usr);
+            url.searchParams.set('tkn', tkn);
+            window.location.href = url.toString();
+        }
+    }
+    " style="display:none;">
+    """, unsafe_allow_html=True)
+    
+    # Mostrar pantalla de login hermosa y moderna
+    st.markdown("<div style='height:40px;'></div>", unsafe_allow_html=True)
+    col_log1, col_log2, col_log3 = st.columns([1, 2, 1])
+    with col_log2:
+        st.markdown("""
+        <div style='text-align: center; margin-bottom: 20px;'>
+            <h2 style='color: #ffffff; font-weight: 700;'>🛠️ Gestión de Planta</h2>
+            <p style='color: #8892b0;'>Por favor inicie sesión para acceder al sistema</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("form_login"):
+            u_input = st.text_input("Usuario / Técnico")
+            p_input = st.text_input("Contraseña", type="password")
+            submit_login = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+            
+            if submit_login:
+                if not u_input.strip() or not p_input.strip():
+                    st.error("Por favor completa el usuario y la contraseña.")
+                else:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT Token, Rol, Puesto FROM usuarios WHERE Usuario = ? AND Password = ?", (u_input.strip(), p_input.strip()))
+                    row = cursor.fetchone()
+                    conn.close()
+                    
+                    if row:
+                        token = row[0]
+                        rol = row[1]
+                        puesto = row[2]
+                        st.session_state["token"] = token
+                        st.session_state["usuario"] = u_input.strip()
+                        st.session_state["rol"] = rol
+                        st.session_state["puesto"] = puesto
+                        st.success("¡Inicio de sesión exitoso! Redireccionando...")
+                        # Redireccionar de forma nativa en Python sin requerir ejecución JS en el form submit
+                        st.query_params["usr"] = u_input.strip()
+                        st.query_params["tkn"] = token
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Usuario o contraseña incorrectos.")
+        
+        st.info("💡 Credencial de fábrica: Usuario 'admin' y Contraseña 'admin'. Recomendamos cambiarla en la sección de Configuración.")
+    st.stop()
+
+# --- FUNCIONES DE BASE DE DATOS ---
+def cargar_datos_db(tabla):
+    conn = get_connection()
+    df = pd.read_sql_query(f"SELECT * FROM {tabla}", conn)
+    conn.close()
+    return df
+
+def cargar_lista_columna(tabla, columna):
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT {columna} FROM {tabla} ORDER BY {columna} ASC")
+        resultados = [row[0] for row in cursor.fetchall()]
+        return resultados
+    except:
+        return []
+    finally:
+        conn.close()
+
+# --- FUNCION DETALLE INDEPENDIENTE EN NUEVA PESTAÑA ---
+def mostrar_detalle_independiente(detail_id):
+    col_back, _ = st.columns([1, 4])
+    if col_back.button("⬅️ Volver al Reporte General", use_container_width=True):
+        st.query_params.clear()
+        st.rerun()
+        
+    st.title(f"📋 Ficha de Mantenimiento Detallada #{detail_id}")
+    st.markdown("---")
+    
+    # Cargar listas para desplegables en la edición
+    maquinas_list_db = cargar_lista_columna("maquinas", "Nombre")
+    empleados_list_db = cargar_lista_columna("empleados", "Nombre")
+    
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM mantenimientos WHERE id = ?", conn, params=[detail_id])
+    conn.close()
+    
+    if df.empty:
+        st.error(f"El registro con ID {detail_id} no existe en la base de datos.")
+        if st.button("Volver al inicio"):
+            st.query_params.clear()
+            st.rerun()
+        return
+        
+    registro = df.iloc[0]
+    
+    # Contenedor con borde para mostrar la ficha
+    with st.container(border=True):
+        st.subheader("📌 Datos de la Intervención")
+        col1, col2, col3 = st.columns(3)
+        col1.write(f"**Fecha de Actividad:** {formatear_fecha_visible(registro['Fecha'])}")
+        col1.write(f"**Depósito:** {registro['Deposito']}")
+        col1.write(f"**Máquina:** {registro['Maquina']}")
+        
+        col2.write(f"**Operario / Técnico:** {registro['Operario']}")
+        col2.write(f"**Tipo Mantenimiento:** {registro['Tipo']}")
+        col2.write(f"**Horímetro:** {registro['Horimetro']} hs")
+        
+        col3.write(f"**Hora Inicio:** {registro['Inicio']}")
+        col3.write(f"**Hora Fin:** {registro['Fin']}")
+        
+        st.markdown("### 📝 Detalle y Repuestos Usados")
+        # Mostrar el detalle con saltos de línea correctos
+        st.info(str(registro['Detalle']).strip())
+        
+        st.markdown("### 📅 Fechas de Control")
+        col_c1, col_c2 = st.columns(2)
+        col_c1.write(f"**Fecha Carga Primaria:** {formatear_fecha_hora_visible(registro['FechaCreacion'])}")
+        
+        # Mostrar el usuario de carga y puesto
+        usuario_carga = registro.get("CreadoPor") if "CreadoPor" in registro and pd.notna(registro["CreadoPor"]) else None
+        col_c2.write(f"**Usuario de Carga:** {usuario_carga or 'No registrado (Carga antigua)'}")
+        if usuario_carga:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT Puesto FROM usuarios WHERE Usuario = ?", (usuario_carga,))
+            p_row = cursor.fetchone()
+            conn.close()
+            if p_row and p_row[0]:
+                col_c2.write(f"**Puesto de Trabajo:** {p_row[0]}")
+        
+        st.write("**Historial de Modificaciones:**")
+        historial_str = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else "Sin modificaciones."
+        st.text_area("Log de cambios:", value=historial_str, height=140, disabled=True)
+
+    # --- SECCIÓN DE EDICIÓN ---
+    st.subheader("✏️ Editar Registro en Ficha")
+    with st.form("form_edicion_detalle"):
+        c1, c2 = st.columns(2)
+        with c1:
+            fecha_edit = st.date_input("Fecha", value=pd.to_datetime(registro["Fecha"]).date(), format="DD/MM/YYYY")
+            deposito_edit = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"], index=["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"].index(registro["Deposito"]) if registro["Deposito"] in ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"] else 0)
+            maquina_edit = st.selectbox("Máquina", maquinas_list_db, index=maquinas_list_db.index(registro["Maquina"]) if registro["Maquina"] in maquinas_list_db else 0)
+            operario_edit = st.selectbox("Técnico responsable", empleados_list_db, index=empleados_list_db.index(registro["Operario"]) if registro["Operario"] in empleados_list_db else 0)
+        with c2:
+            tipo_edit = st.selectbox("Tipo de mantenimiento", ["Correctivo", "Preventivo"], index=["Correctivo", "Preventivo"].index(registro["Tipo"]) if registro["Tipo"] in ["Correctivo", "Preventivo"] else 0)
+            inicio_edit = st.text_input("Hora Inicio", value=str(registro["Inicio"]))
+            fin_edit = st.text_input("Hora Fin", value=str(registro["Fin"]))
+            horimetro_edit = st.number_input("Horímetro", min_value=0.0, step=0.1, value=float(registro["Horimetro"]) if str(registro["Horimetro"]).strip() else 0.0, format="%.1f")
+            
+        detalle_edit = st.text_area("Detalle (Actividad / Repuestos)", value=str(registro["Detalle"]))
+        
+        guardar = st.form_submit_button("💾 Guardar Cambios en Ficha")
+        
+        if guardar:
+            cambios = []
+            if str(registro['Fecha']) != fecha_edit.strftime("%Y-%m-%d"):
+                cambios.append(f"Fecha: '{registro['Fecha']}' -> '{fecha_edit.strftime('%Y-%m-%d')}'")
+            if str(registro['Deposito']) != deposito_edit:
+                cambios.append(f"Depósito: '{registro['Deposito']}' -> '{deposito_edit}'")
+            if str(registro['Maquina']) != maquina_edit:
+                cambios.append(f"Máquina: '{registro['Maquina']}' -> '{maquina_edit}'")
+            if str(registro['Operario']) != operario_edit:
+                cambios.append(f"Técnico: '{registro['Operario']}' -> '{operario_edit}'")
+            if str(registro['Tipo']) != tipo_edit:
+                cambios.append(f"Tipo: '{registro['Tipo']}' -> '{tipo_edit}'")
+            if str(registro['Inicio']) != inicio_edit:
+                cambios.append(f"Inicio: '{registro['Inicio']}' -> '{inicio_edit}'")
+            if str(registro['Fin']) != fin_edit:
+                cambios.append(f"Fin: '{registro['Fin']}' -> '{fin_edit}'")
+            if float(registro['Horimetro']) != float(horimetro_edit):
+                cambios.append(f"Horímetro: '{registro['Horimetro']}' -> '{horimetro_edit}'")
+            if str(registro['Detalle']).strip() != detalle_edit.strip():
+                cambios.append(f"Detalle modificado")
+                
+            if cambios:
+                log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                detalle_cambios = ", ".join(cambios)
+                nuevo_log = f"{log_fecha} - Modificado: {detalle_cambios}"
+                
+                historial_actual = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else ""
+                nuevo_historial = (historial_actual + "\n" + nuevo_log).strip()
+                
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                UPDATE mantenimientos SET
+                    Fecha = ?, Deposito = ?, Maquina = ?, Operario = ?, Tipo = ?, Inicio = ?, Fin = ?, Horimetro = ?, Detalle = ?, HistorialModificaciones = ?
+                WHERE id = ?
+                """, (fecha_edit.strftime("%Y-%m-%d"), deposito_edit, maquina_edit, operario_edit, tipo_edit, inicio_edit, fin_edit, horimetro_edit, detalle_edit, nuevo_historial, detail_id))
+                conn.commit()
+                conn.close()
+                st.success("¡El registro se actualizó y se guardó en el historial!")
+                st.rerun()
+            else:
+                st.info("No se detectaron cambios para guardar.")
+                
+    st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
+    with st.expander("🗑️ Zona de Peligro - Eliminar Registro"):
+        st.warning("⚠️ Esta acción es irreversible y eliminará permanentemente este registro de mantenimiento de la base de datos.")
+        confirmar_eliminar = st.button("🗑️ Confirmar Eliminación Permanente", key=f"del_ficha_{detail_id}", use_container_width=True)
+        if confirmar_eliminar:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM mantenimientos WHERE id = ?", (detail_id,))
+            conn.commit()
+            conn.close()
+            st.success("¡Registro eliminado con éxito!")
+            st.query_params.clear()
+            st.rerun()
+
+def mostrar_ficha_checklist_independiente(chk_id):
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM controles_diarios WHERE id = ?", conn, params=[chk_id])
+    conn.close()
+    
+    if df.empty:
+        st.error(f"El control diario con ID {chk_id} no existe en la base de datos.")
+        if st.button("Volver al inicio"):
+            st.query_params.clear()
+            st.rerun()
+        return
+        
+    registro = df.iloc[0]
+    
+    # Contenedor con borde para mostrar la ficha
+    with st.container(border=True):
+        st.subheader("📋 Reporte de Control Diario (Check-List)")
+        col1, col2, col3 = st.columns(3)
+        col1.write(f"**Fecha:** {formatear_fecha_visible(registro['Fecha'])}")
+        col1.write(f"**Máquina / Equipo:** {registro['Maquina']}")
+        
+        col2.write(f"**Técnico Responsable:** {registro['Tecnico']}")
+        col2.write(f"**Depósito:** {registro['Deposito']}")
+        
+        col3.write(f"**Horómetro / Kilómetros:** {registro['Horimetro_KM']}")
+        
+        # Mostrar el usuario de carga y puesto
+        usuario_carga = registro.get("CreadoPor") if "CreadoPor" in registro and pd.notna(registro["CreadoPor"]) else None
+        col3.write(f"**Usuario de Carga:** {usuario_carga or 'No registrado (Carga antigua)'}")
+        if usuario_carga:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT Puesto FROM usuarios WHERE Usuario = ?", (usuario_carga,))
+            p_row = cursor.fetchone()
+            conn.close()
+            if p_row and p_row[0]:
+                col3.write(f"**Puesto de Trabajo:** {p_row[0]}")
+        
+        st.markdown("---")
+        
+        # Mostrar el listado con formato premium
+        st.markdown("### 🚜 Detalle de la Inspección")
+        
+        c_i1, c_i2 = st.columns(2)
+        
+        with c_i1:
+            st.markdown("##### **I. ANTES de poner en marcha**")
+            st.write(f"**I.a Pérdidas de aceite/agua (mangueras radiador):** {registro['I_a_perdidas']}")
+            st.write(f"**I.b Revisar / agregar nivel de aceite motor:** {registro['I_b_aceite_motor']}")
+            st.write(f"**I.c Revisar / agregar nivel de agua motor:** {registro['I_c_agua_motor']}")
+            st.write(f"**I.d Revisar tensión correa:** {registro['I_d_tension_correa']}")
+            st.write(f"**I.e Revisar presión aire cubiertas:** {registro['I_e_presion_cubiertas']}")
+            st.write(f"**I.f Revisar tensión correas bomba arena intermedia:** {registro['I_f_correa_bba_arena']}")
+            st.write(f"**I.g Control normal funcionamiento al accionar acople embrague:** {registro['I_g_acople_embrague']}")
+            
+            st.markdown("##### **II. Poner en marcha (Calentamiento)**")
+            st.write(f"**II.a Controlar tablero (relojes / vigía):** {registro['II_a_tablero']}")
+            st.write(f"**II.b Controlar funcionamiento sirena y luces marcha atrás:** {registro['II_b_sirena_luces']}")
+            st.write(f"**II.c Probar encloche embrague en vacío (sin vibración/golpes):** {registro['II_c_embrague_vacio']}")
+
+        with c_i2:
+            st.markdown("##### **III. Durante la operación (aprox. 1 hora)**")
+            st.write(f"**III.a Revisar mangueras del radiador (calientes):** {registro['III_a_mangueras_rad']}")
+            st.write(f"**III.b Revisar temperatura rodamientos intermedia:** {registro['III_b_temp_rodamientos']}")
+            
+            st.markdown("##### **IV. Antes del cierre de la jornada (aprox. 15hs)**")
+            st.write(f"**IV.a Engrase movimientos de balde:** {registro['IV_a_engrase_balde']}")
+            st.write(f"**IV.b Engrase movimientos de torre:** {registro['IV_b_engrase_torre']}")
+            
+            st.markdown("##### **📝 Observaciones / Diagnóstico**")
+            obs = str(registro['Observaciones']).strip() if pd.notna(registro['Observaciones']) and str(registro['Observaciones']).strip() else "Sin observaciones."
+            st.info(obs)
+            
+    st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
+    with st.expander("🗑️ Zona de Peligro - Eliminar Control Diario"):
+        st.warning("⚠️ Esta acción es irreversible y eliminará permanentemente este reporte de la base de datos.")
+        confirmar_eliminar = st.button("🗑️ Confirmar Eliminación Permanente", key=f"del_chk_{chk_id}", use_container_width=True)
+        if confirmar_eliminar:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM controles_diarios WHERE id = ?", (chk_id,))
+            conn.commit()
+            conn.close()
+            st.success("¡Control Diario eliminado con éxito!")
+            st.query_params.clear()
+            st.rerun()
+
+def mostrar_registro_rapido_qr(maquina_qr):
+    st.title("📱 Registro Rápido por Código QR")
+    st.markdown(f"### 🚜 Máquina Intervenida: **{maquina_qr}**")
+    st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
+    
+    # Obtener base_url para links
+    config_file = "config_url.json"
+    base_url = "http://localhost:8501"
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r") as f:
+                data = json.load(f)
+                ext_url = data.get("url_externa", "").strip()
+                if ext_url:
+                    base_url = ext_url.rstrip("/")
+        except:
+            pass
+            
+    # Botón para ir al control diario (check-list) en una nueva ventana
+    st.link_button("📋 Registrar Control Diario (Check-List)", f"{base_url}/?qr_checklist={urllib.parse.quote(maquina_qr)}", use_container_width=True)
+    st.markdown("---")
+    
+    empleados_list_db = cargar_lista_columna("empleados", "Nombre")
+    
+    # Intentar pre-seleccionar el usuario logueado si coincide con algún empleado en base de datos (con búsqueda tolerante a acentos/casing)
+    usuario_logueado = st.session_state.get("usuario", "")
+    indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
+        
+    with st.form("form_registro_qr"):
+        deposito = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"])
+        operario = st.selectbox("Técnico Responsable", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar técnico...")
+        tipo = st.selectbox("Tipo de Mantenimiento", ["Correctivo", "Preventivo"])
+        
+        # Entrada rápida de horas con un control deslizante (slider)
+        duracion_horas = st.slider("Duración del trabajo (Horas)", min_value=0.5, max_value=8.0, value=1.0, step=0.5)
+        
+        st.markdown("##### 🔧 Tareas Realizadas (Selecciona con clics):")
+        col1, col2 = st.columns(2)
+        t1 = col1.checkbox("Revisión General")
+        t2 = col1.checkbox("Lubricación / Engrase")
+        t3 = col1.checkbox("Cambio de Aceite")
+        t4 = col2.checkbox("Limpieza de Filtros")
+        t5 = col2.checkbox("Ajuste de Correas / Pernos")
+        t6 = col2.checkbox("Reparación Eléctrica")
+        
+        detalle_adicional = st.text_input("Observación / Repuestos (opcional)", placeholder="Ej: Se cambió correa trapezoidal AVX13")
+        horimetro = st.number_input("Horímetro actual de la máquina (opcional)", min_value=0.0, step=0.1, format="%.1f")
+        
+        guardar = st.form_submit_button("💾 Registrar Mantenimiento")
+        
+        if guardar:
+            if not operario:
+                st.error("⚠️ Por favor selecciona el técnico responsable.")
+            else:
+                # Formatear el detalle
+                tareas = []
+                if t1: tareas.append("Revisión General")
+                if t2: tareas.append("Lubricación/Engrase")
+                if t3: tareas.append("Cambio de Aceite")
+                if t4: tareas.append("Limpieza de Filtros")
+                if t5: tareas.append("Ajuste de Correas/Pernos")
+                if t6: tareas.append("Reparación Eléctrica")
+                
+                detalle_final = ", ".join(tareas)
+                if detalle_adicional:
+                    if detalle_final:
+                        detalle_final += f". Obs: {detalle_adicional}"
+                    else:
+                        detalle_final = detalle_adicional
+                if not detalle_final:
+                    detalle_final = "Mantenimiento preventivo por código QR."
+                    
+                # Calcular horas inicio y fin automáticas
+                hora_fin_dt = datetime.now()
+                hora_ini_dt = hora_fin_dt - pd.Timedelta(hours=duracion_horas)
+                inicio = hora_ini_dt.strftime("%H:%M")
+                fin = hora_fin_dt.strftime("%H:%M")
+                
+                fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                fecha_actividad = datetime.now().strftime("%Y-%m-%d")
+                
+                # Guardar en base de datos
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (fecha_actividad, maquina_qr, operario, tipo, inicio, fin, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("usuario")))
+                conn.commit()
+                conn.close()
+                
+                st.success("🎉 ¡Mantenimiento registrado con éxito!")
+                st.balloons()
+                st.info("Ya puede cerrar esta pestaña en su teléfono.")
+
+def mostrar_checklist_diario_qr(maquina_qr):
+    st.title("📋 Control Diario (Check-List)")
+    st.markdown(f"### 🚜 Máquina: **{maquina_qr}**")
+    st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
+    st.markdown("---")
+    
+    empleados_list_db = cargar_lista_columna("empleados", "Nombre")
+    
+    # Intentar pre-seleccionar el usuario logueado si coincide con algún empleado en base de datos (con búsqueda tolerante a acentos/casing)
+    usuario_logueado = st.session_state.get("usuario", "")
+    indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
+        
+    with st.form("form_checklist_qr"):
+        deposito = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"])
+        operario = st.selectbox("Técnico Responsable", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar técnico...")
+        horimetro_km = st.text_input("Horómetro / Kilómetros (ej: 2591.3 hs o 087485 km)")
+        
+        st.subheader("I. ANTES de poner en marcha")
+        i_a = st.radio("I.a - Revisar pérdidas de aceite/agua (mangueras radiador)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        i_b = st.radio("I.b - Revisar / agregar nivel de aceite motor", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        i_c = st.radio("I.c - Revisar / agregar nivel de agua motor", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        i_d = st.radio("I.d - Revisar tensión correa", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        i_e = st.radio("I.e - Revisar presión aire cubiertas", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        i_f = st.radio("I.f - Revisar tensión correas bomba arena intermedia", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        i_g = st.radio("I.g - Control normal funcionamiento al accionar acople embrague", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        
+        st.subheader("II. Poner en marcha (Calentamiento)")
+        ii_a = st.radio("II.a - Controlar tablero (relojes / vigía)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        ii_b = st.radio("II.b - Controlar funcionamiento sirena y luces marcha atrás", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        ii_c = st.radio("II.c - Probar encloche embrague en vacío (sin vibración/golpes)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        
+        st.subheader("III. Durante la operación (aprox. 1 hora de funcionamiento)")
+        iii_a = st.radio("III.a - Revisar mangueras del radiador (calientes)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        iii_b = st.radio("III.b - Revisar temperatura rodamientos intermedia", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        
+        st.subheader("IV. Antes del cierre de la jornada (aprox. 15hs)")
+        iv_a = st.radio("IV.a - Engrase movimientos balde", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        iv_b = st.radio("IV.b - Engrase movimientos torre", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+        
+        st.subheader("📝 Observaciones Adicionales")
+        observaciones = st.text_area("Notas / Diagnóstico")
+        
+        guardar = st.form_submit_button("💾 Guardar Control Diario")
+        
+        if guardar:
+            if not operario:
+                st.error("⚠️ Por favor selecciona el técnico responsable.")
+            else:
+                fecha_actividad = datetime.now().strftime("%Y-%m-%d")
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                INSERT INTO controles_diarios (
+                    Fecha, Maquina, Tecnico, Deposito, Horimetro_KM,
+                    I_a_perdidas, I_b_aceite_motor, I_c_agua_motor, I_d_tension_correa, I_e_presion_cubiertas, I_f_correa_bba_arena, I_g_acople_embrague,
+                    II_a_tablero, II_b_sirena_luces, II_c_embrague_vacio,
+                    III_a_mangueras_rad, III_b_temp_rodamientos,
+                    IV_a_engrase_balde, IV_b_engrase_torre,
+                    Observaciones, CreadoPor
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    fecha_actividad, maquina_qr, operario, deposito, horimetro_km,
+                    i_a, i_b, i_c, i_d, i_e, i_f, i_g,
+                    ii_a, ii_b, ii_c,
+                    iii_a, iii_b,
+                    iv_a, iv_b,
+                    observaciones, st.session_state.get("usuario")
+                ))
+                conn.commit()
+                conn.close()
+                
+                st.success("🎉 ¡Control Diario guardado con éxito!")
+                st.balloons()
+                st.info("Ya puede cerrar esta pestaña en su teléfono.")
+
+# --- EVALUAR PARÁMETROS DE QUERY (ARRANQUE DE FICHA O REGISTRO QR) ---
+query_params = st.query_params
+if "id" in query_params:
+    detail_id = query_params["id"]
+    mostrar_detalle_independiente(detail_id)
+    st.stop()
+elif "id_chk" in query_params:
+    chk_id = query_params["id_chk"]
+    mostrar_ficha_checklist_independiente(chk_id)
+    st.stop()
+elif "qr_maq" in query_params:
+    maquina_qr = query_params["qr_maq"]
+    mostrar_registro_rapido_qr(maquina_qr)
+    st.stop()
+elif "qr_checklist" in query_params:
+    maquina_qr = query_params["qr_checklist"]
+    mostrar_checklist_diario_qr(maquina_qr)
+    st.stop()
+
+# Carga de listas para menús desplegables
+
+maquinas_list = cargar_lista_columna("maquinas", "Nombre")
+empleados_list = cargar_lista_columna("empleados", "Nombre")
+productos_list = cargar_lista_columna("productos", "Nombre")
+hidro_list = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
+
+# --- INTERFAZ LATERAL ---
+st.sidebar.title("🛠️ GESTIÓN TÉCNICA")
+# Se corrigieron los nombres de menú para evitar pantallas en blanco
+# Se limitan las opciones del menú de acuerdo al Rol de Acceso (Operario vs Administrador)
+user_role = st.session_state.get("rol", "Operario")
+if user_role == "Operario":
+    opciones_menu = [
+        "🔧 Mant. Realizado",
+        "⛽ Control Hidrocarburos",
+        "📦 Control de Stock"
+    ]
+else:
+    opciones_menu = [
+        "🏠 Inicio - Tablero General",
+        "🔧 Mant. Realizado",
+        "📋 Reporte Mant. Realizado",
+        "📦 Control de Stock",
+        "📋 Reporte Movimientos Stock",
+        "⛽ Control Hidrocarburos",
+        "📋 Reporte Movimientos Hidro",
+        "📅 Planificación",
+        "⚙️ Configuración",
+        "📥 Exportar Excel"
+    ]
+
+menu = st.sidebar.radio("Menú:", opciones_menu)
+
+st.sidebar.divider()
+st.sidebar.write(f"👤 Sesión: **{st.session_state['usuario']}**")
+if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
+    st.session_state["usuario"] = None
+    st.session_state["token"] = None
+    st.query_params.clear()
+    st.markdown("""
+    <img src="x" onerror="
+    document.cookie = 'planta_usr=; path=/; max-age=0';
+    document.cookie = 'planta_tkn=; path=/; max-age=0';
+    localStorage.removeItem('planta_usr');
+    localStorage.removeItem('planta_tkn');
+    window.location.href = window.location.origin + window.location.pathname;
+    " style="display:none;">
+    """, unsafe_allow_html=True)
+    st.stop()
+
+# --- 1. TABLERO DE CONTROL Y REPORTES ---
+if menu == "🏠 Inicio - Tablero General":
+    st.title("🏗️ Sistema de Mantenimiento Areneras de la Cruz y Rozas S.A.")
+    st.markdown("---")
+    
+    # Cargar datos
+    df_mant = cargar_datos_db("mantenimientos")
+    df_stock = cargar_datos_db("stock")
+    df_hidro = cargar_datos_db("hidrocarburos")
+    
+    meses_nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+    anios_disponibles = list(range(datetime.now().year - 2, datetime.now().year + 3))
+    
+    # --- DISTRIBUCIÓN DE LAYOUT EN DOS COLUMNAS ---
+    col_izq, col_der = st.columns([4, 6])
+    
+    with col_izq:
+        st.subheader("📅 Período de Análisis")
+        filtro_tiempo = st.radio("Filtro:", ["Histórico Completo", "Filtrar por Mes/Año"], horizontal=True, label_visibility="collapsed")
+        
+        # Filtros de mes y año en columnas pequeñas
+        if filtro_tiempo == "Filtrar por Mes/Año":
+            col_m, col_a = st.columns(2)
+            mes_seleccionado = col_m.selectbox("Mes", meses_nombres, index=datetime.now().month - 1, label_visibility="collapsed")
+            mes_sel = meses_nombres.index(mes_seleccionado) + 1
+            anio_sel = col_a.selectbox("Año", anios_disponibles, index=2, label_visibility="collapsed")
+            
+            # Filtrar mantenimientos por mes/año
+            if not df_mant.empty:
+                df_mant['Fecha_dt'] = pd.to_datetime(df_mant['Fecha'], errors='coerce')
+                df_mant_filtered = df_mant[(df_mant['Fecha_dt'].dt.month == mes_sel) & (df_mant['Fecha_dt'].dt.year == anio_sel)]
+            else:
+                df_mant_filtered = df_mant.copy()
+                
+            # Filtrar stock por mes/año
+            if not df_stock.empty:
+                df_stock['Fecha_dt'] = pd.to_datetime(df_stock['Fecha'], errors='coerce')
+                df_stock_filtered = df_stock[(df_stock['Fecha_dt'].dt.month == mes_sel) & (df_stock['Fecha_dt'].dt.year == anio_sel)]
+            else:
+                df_stock_filtered = df_stock.copy()
+        else:
+            df_mant_filtered = df_mant.copy()
+            df_stock_filtered = df_stock.copy()
+            mes_sel, anio_sel = None, None
+            
+        # Calcular KPIs dinámicos
+        total_mants = len(df_mant_filtered)
+        cant_preventivo = len(df_mant_filtered[df_mant_filtered['Tipo'] == 'Preventivo']) if not df_mant_filtered.empty else 0
+        cant_correctivo = len(df_mant_filtered[df_mant_filtered['Tipo'] == 'Correctivo']) if not df_mant_filtered.empty else 0
+        
+        # Calcular horas de taller estimadas
+        def calcular_horas_totales(df):
+            if df.empty:
+                return 0.0
+            def diff_horas(row):
+                try:
+                    h_i, m_i = map(int, str(row['Inicio']).split(':'))
+                    h_f, m_f = map(int, str(row['Fin']).split(':'))
+                    diff = (h_f * 60 + m_f) - (h_i * 60 + m_i)
+                    return max(0.0, diff / 60.0)
+                except:
+                    return 0.0
+            return df.apply(diff_horas, axis=1).sum()
+            
+        horas_taller = calcular_horas_totales(df_mant_filtered)
+        maquinas_intervenidas = df_mant_filtered['Maquina'].nunique() if not df_mant_filtered.empty else 0
+        
+        # Cálculo histórico acumulado de combustibles
+        stock_combustible = {}
+        if not df_hidro.empty:
+            df_hidro['Val'] = df_hidro.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
+            stock_combustible = df_hidro.groupby('Producto')['Val'].sum().to_dict()
+            
+        st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
+        st.subheader("🚜 Top 10 Máquinas Intervenidas")
+        if not df_mant_filtered.empty:
+            df_grouped = df_mant_filtered.groupby(['Maquina', 'Tipo']).size().reset_index(name='Cantidad')
+            top_machines = df_mant_filtered['Maquina'].value_counts().head(10).index
+            df_top = df_grouped[df_grouped['Maquina'].isin(top_machines)]
+            
+            import plotly.express as px
+            fig_bar = px.bar(
+                df_top, 
+                x='Maquina', 
+                y='Cantidad', 
+                color='Tipo',
+                color_discrete_map={'Preventivo': '#28a745', 'Correctivo': '#dc3545'},
+                barmode='stack',
+                category_orders={"Maquina": list(top_machines)}
+            )
+            fig_bar.update_layout(
+                height=300,
+                xaxis_title=None,
+                yaxis_title=None,
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor='rgba(0,0,0,0)', 
+                plot_bgcolor='rgba(0,0,0,0)',
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.info("No hay mantenimientos en este período.")
+            
+    with col_der:
+        st.subheader("📈 Resumen General")
+        
+        # KPIs en grilla de 2x2
+        ck1, ck2 = st.columns(2)
+        ck1.metric("Mantenimientos Realizados", total_mants)
+        ck2.metric("Horas de Taller", f"{horas_taller:.1f} hrs")
+        
+        ck3, ck4 = st.columns(2)
+        stock_gasoil_val = stock_combustible.get('Gas-oil', 0.0)
+        ck3.metric("Stock Gas-oil", f"{stock_gasoil_val:,.0f} Lts")
+        ck4.metric("Máquinas Intervenidas", maquinas_intervenidas)
+        
+        st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
+        st.subheader("📊 Indicadores de Tipo")
+        cg1, cg2 = st.columns(2)
+        
+        import plotly.graph_objects as go
+        
+        with cg1:
+            fig_prev = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = cant_preventivo,
+                title = {'text': "Preventivos (Meta: Alto)", 'font': {'size': 14, 'color': '#28a745'}},
+                gauge = {
+                    'axis': {'range': [0, max(50, total_mants)]},
+                    'bar': {'color': "#28a745"},
+                    'bgcolor': "#1f232a",
+                    'borderwidth': 1,
+                    'bordercolor': "gray",
+                }
+            ))
+            fig_prev.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_prev, use_container_width=True)
+            
+        with cg2:
+            fig_corr = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = cant_correctivo,
+                title = {'text': "Correctivos (Meta: Bajo)", 'font': {'size': 14, 'color': '#dc3545'}},
+                gauge = {
+                    'axis': {'range': [0, max(50, total_mants)]},
+                    'bar': {'color': "#dc3545"},
+                    'bgcolor': "#1f232a",
+                    'borderwidth': 1,
+                    'bordercolor': "gray",
+                }
+            ))
+            fig_corr.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_corr, use_container_width=True)
+            
+        st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
+        st.subheader("⛽ Stock de Hidrocarburos")
+        if not df_hidro.empty:
+            hidro_productos = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
+            
+            # En columnas de 2x2 para hidrocarburos
+            ch_col1, ch_col2 = st.columns(2)
+            for idx, prod in enumerate(hidro_productos):
+                stock_val = stock_combustible.get(prod, 0.0)
+                unidad = "Lts" if prod != "Grasa de Litio" else "Kg"
+                
+                # Definir alertas de stock
+                if prod == "Gas-oil":
+                    alerta_critica = 1500
+                    alerta_moderada = 3000
+                else:
+                    alerta_critica = 50
+                    alerta_moderada = 100
+                    
+                status_text = "Estable"
+                status_color = "normal"
+                
+                if stock_val < alerta_critica:
+                    status_text = "⚠️ Stock Crítico"
+                    status_color = "inverse"
+                elif stock_val < alerta_moderada:
+                    status_text = "⚠️ Stock Bajo"
+                    status_color = "off"
+                    
+                target_col = ch_col1 if idx % 2 == 0 else ch_col2
+                with target_col:
+                    st.metric(
+                        label=f"{prod} ({unidad})",
+                        value=f"{stock_val:,.1f}",
+                        delta=status_text,
+                        delta_color=status_color
+                    )
+        else:
+            st.info("No hay movimientos de hidrocarburos registrados.")
+
+
+# --- 2. MANTENIMIENTO REALIZADO ---
+elif menu == "🔧 Mant. Realizado":
+    st.header("📝 Registro de Intervención")
+    
+    tipo_registro = st.radio(
+        "Seleccione el tipo de carga:",
+        ["🔧 Registrar Mantenimiento Realizado", "📋 Registrar Control Diario (Check-List)"],
+        horizontal=True
+    )
+    
+    deposito = st.selectbox(
+        "Seleccioná el depósito",
+        ["-- Seleccionar --", "Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"]
+    )
+
+    if deposito == "-- Seleccionar --":
+        st.info("Seleccioná un depósito para habilitar el panel de registro.")
+    elif not maquinas_list or not empleados_list:
+        st.warning("⚠️ Primero cargue máquinas y personal en la pestaña Configuración.")
+    else:
+        if tipo_registro == "🔧 Registrar Mantenimiento Realizado":
+            with st.form("form_mant"):
+                c1, c2 = st.columns(2)
+                fecha = c1.date_input("Fecha", datetime.now(), format="DD/MM/YYYY")
+                # Intentar pre-seleccionar el usuario logueado si coincide con algún empleado en base de datos (con búsqueda tolerante a acentos/casing)
+                usuario_logueado = st.session_state.get("usuario", "")
+                indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
+                    
+                maquina = c1.selectbox("Máquina Intervenida", maquinas_list, index=None, placeholder="Escribe para buscar máquina...")
+                operario = c1.selectbox("Técnico Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar técnico...")
+                tipo = c2.selectbox("Tipo de Mantenimiento", ["Correctivo", "Preventivo"])
+                h_i = c2.time_input("Hora Inicio")
+                h_f = c2.time_input("Hora Fin")
+                horimetro = st.number_input("Horímetro", min_value=0.0, step=0.1, format="%.1f")
+                repuestos = st.text_area("Detalle de la tarea y Repuestos usados")
+                
+                if st.form_submit_button("Guardar Registro"):
+                    if not maquina:
+                        st.error("⚠️ Por favor selecciona la máquina intervenida.")
+                    elif not operario:
+                        st.error("⚠️ Por favor selecciona el técnico responsable.")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        cursor.execute("""
+                        INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (fecha.strftime("%Y-%m-%d"), maquina, operario, tipo, str(h_i), str(h_f), horimetro, repuestos, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("usuario")))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Mantenimiento guardado!")
+                        st.rerun()
+        else:
+            # 1. Selección de máquina base (fuera del formulario para respuesta rápida al clic)
+            if "maquina_seleccionada_pc" not in st.session_state:
+                st.session_state["maquina_seleccionada_pc"] = "Scania"
+                
+            st.markdown("##### 🚜 Selección Rápida de Equipo Base:")
+            cols_base = st.columns(5)
+            equipos_base = ["Scania", "Case W20", "Michigan 75", "Toyota 1", "Toyota 2"]
+            
+            for idx, eq in enumerate(equipos_base):
+                es_seleccionado = (st.session_state["maquina_seleccionada_pc"] == eq)
+                # Resaltar con una estrella el botón seleccionado
+                label_boton = f"⭐ {eq}" if es_seleccionado else eq
+                if cols_base[idx].button(label_boton, key=f"btn_base_{eq}", use_container_width=True):
+                    st.session_state["maquina_seleccionada_pc"] = eq
+                    st.rerun()
+            
+            # Checkbox para seleccionar otra maquina del catalogo completo
+            evaluar_otra = st.checkbox("🔍 Buscar otra máquina del catálogo completo (194 equipos)", 
+                                       value=(st.session_state["maquina_seleccionada_pc"] not in equipos_base))
+            
+            if evaluar_otra:
+                maquina_seleccionada = st.selectbox("Máquina / Equipo", maquinas_list, index=None, placeholder="Escribe para buscar...")
+                if maquina_seleccionada:
+                    st.session_state["maquina_seleccionada_pc"] = maquina_seleccionada
+            else:
+                maquina_seleccionada = st.session_state["maquina_seleccionada_pc"]
+                st.info(f"💡 Evaluando equipo base: **{maquina_seleccionada}** (Todos los puntos inician en 'OK ✔️' por defecto, solo cambia los que tengan fallas)")
+
+            with st.form("form_checklist_pc"):
+                c1, c2 = st.columns(2)
+                fecha = c1.date_input("Fecha", datetime.now(), format="DD/MM/YYYY")
+                usuario_logueado = st.session_state.get("usuario", "")
+                indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
+                
+                # Desplegar la máquina activa no editable dentro del formulario
+                st.write(f"🚜 **Equipo a evaluar:** `{maquina_seleccionada or 'Ninguno seleccionado'}`")
+                operario = c1.selectbox("Técnico Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar técnico...")
+                horimetro_km = c2.text_input("Horómetro / Kilómetros (ej: 2591.3 hs o 087485 km)")
+                
+                st.subheader("I. ANTES de poner en marcha")
+                i_a = st.radio("I.a - Revisar pérdidas de aceite/agua (mangueras radiador)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                i_b = st.radio("I.b - Revisar / agregar nivel de aceite motor", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                i_c = st.radio("I.c - Revisar / agregar nivel de agua motor", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                i_d = st.radio("I.d - Revisar tensión correa", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                i_e = st.radio("I.e - Revisar presión aire cubiertas", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                i_f = st.radio("I.f - Revisar tensión correas bomba arena intermedia", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                i_g = st.radio("I.g - Control normal funcionamiento al accionar acople embrague", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                
+                st.subheader("II. Poner en marcha (Calentamiento)")
+                ii_a = st.radio("II.a - Controlar tablero (relojes / vigía)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                ii_b = st.radio("II.b - Controlar funcionamiento sirena y luces marcha atrás", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                ii_c = st.radio("II.c - Probar encloche embrague en vacío (sin vibración/golpes)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                
+                st.subheader("III. Durante la operación (aprox. 1 hora de funcionamiento)")
+                iii_a = st.radio("III.a - Revisar mangueras del radiador (calientes)", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                iii_b = st.radio("III.b - Revisar temperatura rodamientos intermedia", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                
+                st.subheader("IV. Antes del cierre de la jornada (aprox. 15hs)")
+                iv_a = st.radio("IV.a - Engrase movimientos balde", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                iv_b = st.radio("IV.b - Engrase movimientos torre", ["OK ✔️", "No OK ❌", "N/A"], horizontal=True)
+                
+                st.subheader("📝 Observaciones Adicionales")
+                observaciones = st.text_area("Notas / Diagnóstico")
+                
+                guardar_cd = st.form_submit_button("💾 Guardar Control Diario")
+                if guardar_cd:
+                    if not maquina_seleccionada:
+                        st.error("⚠️ Por favor selecciona la máquina.")
+                    elif not operario:
+                        st.error("⚠️ Por favor selecciona el técnico responsable.")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                        INSERT INTO controles_diarios (
+                            Fecha, Maquina, Tecnico, Deposito, Horimetro_KM,
+                            I_a_perdidas, I_b_aceite_motor, I_c_agua_motor, I_d_tension_correa, I_e_presion_cubiertas, I_f_correa_bba_arena, I_g_acople_embrague,
+                            II_a_tablero, II_b_sirena_luces, II_c_embrague_vacio,
+                            III_a_mangueras_rad, III_b_temp_rodamientos,
+                            IV_a_engrase_balde, IV_b_engrase_torre,
+                            Observaciones, CreadoPor
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            fecha.strftime("%Y-%m-%d"), maquina_seleccionada, operario, deposito, horimetro_km,
+                            i_a, i_b, i_c, i_d, i_e, i_f, i_g,
+                            ii_a, ii_b, ii_c,
+                            iii_a, iii_b,
+                            iv_a, iv_b,
+                            observaciones, st.session_state.get("usuario")
+                        ))
+                        conn.commit()
+                        conn.close()
+                        st.success(f"🎉 ¡Control Diario para {maquina_seleccionada} guardado con éxito!")
+                        st.balloons()
+                        st.rerun()
+
+# --- 3. REPORTE MANTENIMIENTO REALIZADO ---
+elif menu == "📋 Reporte Mant. Realizado":
+    st.header("📋 Reporte de Actividades e Inspecciones")
+    
+    tab_mants, tab_checklist = st.tabs(["🔧 Mantenimientos Realizados", "📋 Controles Diarios (Check-List)"])
+    
+    with tab_mants:
+        df_mant = cargar_datos_db("mantenimientos")
+
+        if df_mant.empty:
+            st.warning("No hay registros de mantenimiento realizado cargados.")
+        else:
+            df_mant["Fecha_dt"] = pd.to_datetime(df_mant["Fecha"], errors="coerce")
+            depositos = ["Todos"] + sorted([d for d in df_mant["Deposito"].dropna().astype(str).unique() if d])
+            tipos = ["Todos"] + sorted([t for t in df_mant["Tipo"].dropna().astype(str).unique() if t])
+            maquinas = ["Todos"] + sorted([m for m in df_mant["Maquina"].dropna().astype(str).unique() if m])
+            tecnicos = ["Todos"] + sorted([t for t in df_mant["Operario"].dropna().astype(str).unique() if t])
+
+            c1, c2 = st.columns(2)
+            filtro_deposito = c1.selectbox("Depósito", depositos)
+            filtro_tipo = c2.selectbox("Tipo de mantenimiento", tipos)
+            c3, c4 = st.columns(2)
+            filtro_maquina = c3.selectbox("Máquina", maquinas)
+            filtro_tecnico = c4.selectbox("Técnico responsable", tecnicos)
+            c5, c6 = st.columns(2)
+            fecha_min = df_mant["Fecha_dt"].min().date() if not df_mant["Fecha_dt"].isnull().all() else datetime.now().date()
+            fecha_max = df_mant["Fecha_dt"].max().date() if not df_mant["Fecha_dt"].isnull().all() else datetime.now().date()
+            rango_fecha = c5.date_input("Fecha desde", value=fecha_min, format="DD/MM/YYYY")
+            rango_hasta = c6.date_input("Fecha hasta", value=fecha_max, format="DD/MM/YYYY")
+
+            df_filtrado = df_mant.copy()
+            if filtro_deposito != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["Deposito"] == filtro_deposito]
+            if filtro_tipo != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["Tipo"] == filtro_tipo]
+            if filtro_maquina != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["Maquina"] == filtro_maquina]
+            if filtro_tecnico != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["Operario"] == filtro_tecnico]
+
+            df_filtrado = df_filtrado[(df_filtrado["Fecha_dt"] >= pd.Timestamp(rango_fecha)) & (df_filtrado["Fecha_dt"] <= pd.Timestamp(rango_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))]
+            df_filtrado = df_filtrado.sort_values(by="Fecha_dt", ascending=False).reset_index(drop=True)
+            
+            # Usar el ID real de la base de datos para evitar confusiones de numeración
+            df_filtrado["N° Registro"] = df_filtrado["id"]
+
+            col_total, col_filtrados = st.columns(2)
+            col_total.metric("Total registros", len(df_mant))
+            col_filtrados.metric("Registros filtrados", len(df_filtrado))
+
+            # Obtener base_url para links
+            config_file = "config_url.json"
+            base_url = "http://localhost:8501"
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r") as f:
+                        data = json.load(f)
+                        ext_url = data.get("url_externa", "").strip()
+                        if ext_url:
+                            base_url = ext_url.rstrip("/")
+                except:
+                    pass
+
+            # Agregar columna virtual para enlace a nueva pestaña en la visualización
+            export_df = df_filtrado[["N° Registro"]].copy()
+            user_token = st.session_state.get("token", "")
+            export_df["Ficha"] = df_filtrado["id"].apply(lambda x: f"{base_url}/?id={x}&usr={st.session_state['usuario']}&tkn={user_token}")
+            export_df["Fecha"] = df_filtrado["Fecha"].apply(formatear_fecha_visible)
+            for col in ["Deposito", "Maquina", "Operario", "Tipo", "Inicio", "Fin", "Horimetro", "Detalle"]:
+                export_df[col] = df_filtrado[col]
+
+            # Crear copia limpia para exportar a Excel (sin la columna de URL interna Ficha)
+            excel_export_df = export_df[["N° Registro", "Fecha", "Deposito", "Maquina", "Operario", "Tipo", "Inicio", "Fin", "Horimetro", "Detalle"]].copy()
+
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                excel_export_df.to_excel(writer, index=False, sheet_name="Mantenimiento Realizado")
+            output.seek(0)
+            st.download_button(
+                "📥 Exportar filtrados a Excel",
+                data=output.getvalue(),
+                file_name="mantenimiento_realizado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+            st.caption(f"Registros encontrados: {len(df_filtrado)} (💡 Haz clic en 'Abrir Ficha' de cualquier fila para ver el detalle en una nueva pestaña)")
+            
+            # Mostrar la tabla con el enlace a nueva pestaña
+            st.dataframe(
+                export_df,
+                column_config={
+                    "Ficha": st.column_config.LinkColumn("🔍 Ficha", display_text="Abrir Ficha")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.subheader("✏️ Editor visual de registros")
+            st.markdown("Seleccioná un registro para editarlo o eliminarlo. El panel está organizado en tarjetas para una lectura más cómoda.")
+            
+            # Guardamos el ID real de la base de datos junto con la opción visual
+            opciones_registro = ["-- Seleccionar --"]
+            mapping_opciones = {} # Mapea la opción de texto al ID real en la base de datos
+            
+            for _, row in df_filtrado.iterrows():
+                texto_opcion = f"Ref: {row['id']} | {formatear_fecha_visible(row['Fecha'])} | {row['Deposito']} | {row['Maquina']} | {row['Operario']}"
+                opciones_registro.append(texto_opcion)
+                mapping_opciones[texto_opcion] = row['id']
+                
+            seleccion = st.selectbox("Seleccioná un registro", opciones_registro)
+
+            if seleccion != "-- Seleccionar --":
+                db_id = mapping_opciones[seleccion]
+                
+                # Botón para abrir detalle completo en nueva pestaña
+                st.link_button("🔎 Abrir Ficha Detallada en Nueva Pestaña", f"/?id={db_id}", use_container_width=True)
+                st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+                
+                # Traer el registro fresco directamente por ID
+                registro = df_mant[df_mant["id"] == db_id].iloc[0]
+
+                if "editor_activo" not in st.session_state:
+                    st.session_state["editor_activo"] = None
+
+                editando = st.session_state["editor_activo"] == db_id
+
+                with st.container(border=True):
+                    st.subheader("📌 Ficha del mantenimiento")
+                    col_info_a, col_info_b = st.columns(2)
+                    with col_info_a:
+                        st.write(f"**Fecha:** {formatear_fecha_visible(registro['Fecha'])}")
+                        st.write(f"**Depósito:** {registro['Deposito']}")
+                        st.write(f"**Máquina:** {registro['Maquina']}")
+                        st.write(f"**Operario:** {registro['Operario']}")
+                    with col_info_b:
+                        st.write(f"**Tipo:** {registro['Tipo']}")
+                        st.write(f"**Inicio:** {registro['Inicio']}")
+                        st.write(f"**Fin:** {registro['Fin']}")
+                        st.write(f"**Horímetro:** {registro['Horimetro']}")
+
+                    st.markdown("### 📝 Detalle de la tarea y repuestos usados")
+                    detalle_guardado = str(registro["Detalle"]).strip()
+                    if detalle_guardado:
+                        st.markdown(
+                            f"""
+                            <div style="padding:16px 18px; border-radius:10px; background:#1f232a; border:1px solid #444; color:#f1f5f9; white-space:pre-line; line-height:1.4;">
+                            {detalle_guardado}
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.info("Este registro no tiene detalle guardado.")
+
+                st.caption("El panel de edición solo se habilita al presionar Editar.")
+                boton_label = "❌ Cerrar edición" if editando else "✏️ Editar este registro"
+                if st.button(boton_label, key=f"toggle_edit_{db_id}"):
+                    st.session_state["editor_activo"] = None if editando else db_id
+                    st.rerun()
+
+                if editando:
+                    with st.container(border=True):
+                        st.subheader("✏️ Edición del registro")
+                        with st.form(f"editar_registro_{db_id}"):
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                fecha_edit = st.date_input("Fecha", value=pd.to_datetime(registro["Fecha"]).date(), format="DD/MM/YYYY")
+                                deposito_edit = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"], index=["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"].index(registro["Deposito"]) if registro["Deposito"] in ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"] else 0)
+                                maquina_edit = st.selectbox("Máquina", maquinas_list, index=maquinas_list.index(registro["Maquina"]) if registro["Maquina"] in maquinas_list else 0)
+                                operario_edit = st.selectbox("Técnico responsable", empleados_list, index=empleados_list.index(registro["Operario"]) if registro["Operario"] in empleados_list else 0)
+                            with col_b:
+                                tipo_edit = st.selectbox("Tipo de mantenimiento", ["Correctivo", "Preventivo"], index=["Correctivo", "Preventivo"].index(registro["Tipo"]) if registro["Tipo"] in ["Correctivo", "Preventivo"] else 0)
+                                inicio_edit = st.text_input("Hora Inicio", value=str(registro["Inicio"]))
+                                fin_edit = st.text_input("Hora Fin", value=str(registro["Fin"]))
+                                horimetro_edit = st.number_input("Horímetro", min_value=0.0, step=0.1, value=float(registro["Horimetro"]) if str(registro["Horimetro"]).strip() else 0.0, format="%.1f")
+                            detalle_edit = st.text_area("Detalle", value=str(registro["Detalle"]), height=160)
+
+                            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+                            col_editar, col_eliminar = st.columns([2, 1])
+                            with col_editar:
+                                guardar = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                            with col_eliminar:
+                                eliminar = st.form_submit_button("🗑️ Eliminar", use_container_width=True)
+
+                            if guardar:
+                                cambios = []
+                                if str(registro['Fecha']) != fecha_edit.strftime("%Y-%m-%d"):
+                                    cambios.append(f"Fecha: '{registro['Fecha']}' -> '{fecha_edit.strftime('%Y-%m-%d')}'")
+                                if str(registro['Deposito']) != deposito_edit:
+                                    cambios.append(f"Depósito: '{registro['Deposito']}' -> '{deposito_edit}'")
+                                if str(registro['Maquina']) != maquina_edit:
+                                    cambios.append(f"Máquina: '{registro['Maquina']}' -> '{maquina_edit}'")
+                                if str(registro['Operario']) != operario_edit:
+                                    cambios.append(f"Técnico: '{registro['Operario']}' -> '{operario_edit}'")
+                                if str(registro['Tipo']) != tipo_edit:
+                                    cambios.append(f"Tipo: '{registro['Tipo']}' -> '{tipo_edit}'")
+                                if str(registro['Inicio']) != inicio_edit:
+                                    cambios.append(f"Inicio: '{registro['Inicio']}' -> '{inicio_edit}'")
+                                if str(registro['Fin']) != fin_edit:
+                                    cambios.append(f"Fin: '{registro['Fin']}' -> '{fin_edit}'")
+                                if float(registro['Horimetro']) != float(horimetro_edit):
+                                    cambios.append(f"Horímetro: '{registro['Horimetro']}' -> '{horimetro_edit}'")
+                                if str(registro['Detalle']).strip() != detalle_edit.strip():
+                                    cambios.append(f"Detalle modificado")
+                                    
+                                if cambios:
+                                    log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    detalle_cambios = ", ".join(cambios)
+                                    nuevo_log = f"{log_fecha} - Modificado: {detalle_cambios}"
+                                    
+                                    historial_actual = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else ""
+                                    nuevo_historial = (historial_actual + "\n" + nuevo_log).strip()
+                                else:
+                                    nuevo_historial = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else ""
+
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute("""
+                                UPDATE mantenimientos SET
+                                    Fecha = ?, Deposito = ?, Maquina = ?, Operario = ?, Tipo = ?, Inicio = ?, Fin = ?, Horimetro = ?, Detalle = ?, HistorialModificaciones = ?
+                                WHERE id = ?
+                                """, (fecha_edit.strftime("%Y-%m-%d"), deposito_edit, maquina_edit, operario_edit, tipo_edit, inicio_edit, fin_edit, horimetro_edit, detalle_edit, nuevo_historial, db_id))
+                                conn.commit()
+                                conn.close()
+                                
+                                st.success("Registro actualizado")
+                                st.session_state["editor_activo"] = None
+                                st.rerun()
+
+                            if eliminar:
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM mantenimientos WHERE id = ?", (db_id,))
+                                conn.commit()
+                                conn.close()
+                                
+                                st.warning("Registro eliminado")
+                                st.session_state["editor_activo"] = None
+                                st.rerun()
+                                
+    with tab_checklist:
+        st.subheader("📋 Controles Diarios de Equipos Realizados")
+        df_cd = cargar_datos_db("controles_diarios")
+        
+        if df_cd.empty:
+            st.info("No hay controles diarios registrados.")
+        else:
+            df_cd_filtrado = df_cd.copy()
+            
+            c_f1, c_f2 = st.columns(2)
+            maquinas_cd = ["Todos"] + sorted(list(df_cd["Maquina"].dropna().unique()))
+            tecnicos_cd = ["Todos"] + sorted(list(df_cd["Tecnico"].dropna().unique()))
+            
+            filtro_maq_cd = c_f1.selectbox("Filtrar por Máquina", maquinas_cd, key="f_maq_cd")
+            filtro_tec_cd = c_f2.selectbox("Filtrar por Técnico", tecnicos_cd, key="f_tec_cd")
+            
+            if filtro_maq_cd != "Todos":
+                df_cd_filtrado = df_cd_filtrado[df_cd_filtrado["Maquina"] == filtro_maq_cd]
+            if filtro_tec_cd != "Todos":
+                df_cd_filtrado = df_cd_filtrado[df_cd_filtrado["Tecnico"] == filtro_tec_cd]
+                
+            # Formatear la fecha
+            df_cd_sorted = df_cd_filtrado.sort_values(by="id", ascending=False).copy()
+            df_cd_sorted["Fecha"] = df_cd_sorted["Fecha"].apply(formatear_fecha_visible)
+            
+            # Obtener base_url para links
+            config_file = "config_url.json"
+            base_url = "http://localhost:8501"
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r") as f:
+                        data = json.load(f)
+                        ext_url = data.get("url_externa", "").strip()
+                        if ext_url:
+                            base_url = ext_url.rstrip("/")
+                except:
+                    pass
+                    
+            # Agregar columna de Enlace Ficha pre-autenticada
+            df_cd_tabla = pd.DataFrame()
+            user_token = st.session_state.get("token", "")
+            df_cd_tabla["Ficha"] = df_cd_sorted["id"].apply(lambda x: f"{base_url}/?id_chk={x}&usr={st.session_state['usuario']}&tkn={user_token}")
+            
+            # Copiar las demás columnas en orden
+            columnas_ordenadas = ["id", "Fecha", "Maquina", "Tecnico", "Deposito", "Horimetro_KM"]
+            inspecciones_cols = [
+                "I_a_perdidas", "I_b_aceite_motor", "I_c_agua_motor", "I_d_tension_correa", "I_e_presion_cubiertas", "I_f_correa_bba_arena", "I_g_acople_embrague",
+                "II_a_tablero", "II_b_sirena_luces", "II_c_embrague_vacio",
+                "III_a_mangueras_rad", "III_b_temp_rodamientos",
+                "IV_a_engrase_balde", "IV_b_engrase_torre",
+                "Observaciones"
+            ]
+            for col in columnas_ordenadas + inspecciones_cols:
+                df_cd_tabla[col] = df_cd_sorted[col]
+                
+            # Renombrar columnas para la visualización de la tabla para que sea más amigable
+            df_cd_tabla_renombrado = df_cd_tabla.rename(columns={
+                "id": "N° Registro",
+                "Horimetro_KM": "Horómetro/KM",
+                "I_a_perdidas": "I.a Pérdidas",
+                "I_b_aceite_motor": "I.b Aceite Motor",
+                "I_c_agua_motor": "I.c Agua Motor",
+                "I_d_tension_correa": "I.d Tensión Correa",
+                "I_e_presion_cubiertas": "I.e Presión Aire",
+                "I_f_correa_bba_arena": "I.f Correa Bba Sand",
+                "I_g_acople_embrague": "I.g Acople Embrague",
+                "II_a_tablero": "II.a Tablero Relojes",
+                "II_b_sirena_luces": "II.b Sirena/Luces",
+                "II_c_embrague_vacio": "II.c Embrague Vacío",
+                "III_a_mangueras_rad": "III.a Mangueras Rad",
+                "III_b_temp_rodamientos": "III.b Rodamientos",
+                "IV_a_engrase_balde": "IV.a Engrase Balde",
+                "IV_b_engrase_torre": "IV.b Engrase Torre",
+                "Observaciones": "Observaciones / Diagnóstico"
+            })
+            
+            # Exportar a Excel (sin la columna de URL Ficha)
+            excel_export_cd = df_cd_tabla_renombrado.drop(columns=["Ficha"]).copy()
+            output_cd = BytesIO()
+            with pd.ExcelWriter(output_cd, engine="openpyxl") as writer:
+                excel_export_cd.to_excel(writer, index=False, sheet_name="Controles Diarios")
+            output_cd.seek(0)
+            st.download_button(
+                "📥 Exportar Controles Diarios a Excel",
+                data=output_cd.getvalue(),
+                file_name="controles_diarios.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="btn_dl_cd"
+            )
+            
+            # Mostrar la tabla
+            st.dataframe(
+                df_cd_tabla_renombrado,
+                column_config={
+                    "Ficha": st.column_config.LinkColumn("🔍 Ficha", display_text="Abrir Ficha")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
+# --- 4. PLANIFICACIÓN ---
+elif menu == "📅 Planificación":
+    st.header("📅 Plan de Mantenimientos Preventivos")
+    df_p = cargar_datos_db("planificacion")
+    
+    col_p1, col_p2 = st.columns([1, 2])
+    with col_p1:
+        st.subheader("Programar Tarea")
+        with st.form("f_plan"):
+            m_p = st.selectbox("Máquina", maquinas_list)
+            tarea = st.text_input("Tarea (ej: Cambio de aceite)")
+            f_p = st.date_input("Fecha Prevista", format="DD/MM/YYYY")
+            if st.form_submit_button("Programar"):
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                INSERT INTO planificacion (Maquina, Tarea, Fecha_Prog, Estado, Fecha_Fin, Tecnico)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (m_p, tarea, f_p.strftime("%Y-%m-%d"), "Pendiente", "", ""))
+                conn.commit()
+                conn.close()
+                st.rerun()
+    
+    with col_p2:
+        st.subheader("Tareas Pendientes")
+        if not df_p.empty:
+            df_pendientes = df_p[df_p["Estado"] == "Pendiente"]
+        else:
+            df_pendientes = pd.DataFrame()
+            
+        if not df_pendientes.empty:
+            for idx, row in df_pendientes.iterrows():
+                db_id = row['id']
+                with st.expander(f"{formatear_fecha_visible(row['Fecha_Prog'])} - {row['Maquina']}"):
+                    st.write(f"Tarea: {row['Tarea']}")
+                    op_realizo = st.selectbox("Quién realizó", empleados_list, key=f"op_{db_id}")
+                    if st.button("Marcar como Realizado", key=f"btn_{db_id}"):
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                        UPDATE planificacion SET
+                            Estado = "Realizado",
+                            Fecha_Fin = ?,
+                            Tecnico = ?
+                        WHERE id = ?
+                        """, (datetime.now().strftime("%Y-%m-%d"), op_realizo, db_id))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+        else:
+            st.info("No hay tareas pendientes.")
+
+# --- 5. CONTROL DE STOCK (Corregido nombre del menú) ---
+elif menu == "📦 Control de Stock":
+    st.header("📦 Movimientos de Stock")
+    with st.form("f_stock"):
+        c1, c2 = st.columns(2)
+        tipo_m = c1.selectbox("Acción", ["Ingreso", "Egreso"])
+        prod = c1.selectbox("Producto", productos_list, index=None, placeholder="Escribe para buscar producto...")
+        cant = c2.number_input("Cantidad", min_value=0.0)
+        dest = c2.text_input("Ubicación / Destino")
+        if st.form_submit_button("Registrar"):
+            if not prod:
+                st.error("⚠️ Por favor selecciona un producto.")
+            else:
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                INSERT INTO stock (Fecha, Producto, Movimiento, Cantidad, Destino)
+                VALUES (?, ?, ?, ?, ?)
+                """, (datetime.now().strftime("%Y-%m-%d"), prod, tipo_m, cant, dest))
+                conn.commit()
+                conn.close()
+                st.success("Stock actualizado.")
+
+# --- 5.5. REPORTE DE MOVIMIENTOS DE STOCK (REPUESTOS E INSUMOS) ---
+elif menu == "📋 Reporte Movimientos Stock":
+    st.header("📋 Detalle de Movimientos de Stock (Repuestos e Insumos)")
+    
+    # Cargar datos
+    df_s = cargar_datos_db("stock")
+    
+    if df_s.empty:
+        st.warning("No se encontraron registros de movimientos de stock.")
+    else:
+        # Cálculo de Stock Remanente
+        df_s['Aux_Cant'] = df_s.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
+        stock_actual = df_s.groupby('Producto')['Aux_Cant'].sum().reset_index()
+        stock_actual.columns = ['Producto', 'Stock Remanente']
+        
+        # Mostrar Resumen de Stock
+        st.subheader("📦 Resumen de Stock Remanente")
+        st.dataframe(stock_actual, use_container_width=True, hide_index=True)
+        
+        st.divider()
+        
+        st.subheader("🔍 Historial Detallado")
+        
+        # Parsear fecha a datetime para filtros de mes y año
+        df_s['Fecha_dt'] = pd.to_datetime(df_s['Fecha'], errors='coerce')
+        df_s['Año'] = df_s['Fecha_dt'].dt.year.fillna(0).astype(int)
+        df_s['Mes_num'] = df_s['Fecha_dt'].dt.month.fillna(0).astype(int)
+        
+        nombres_meses = {
+            1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+            7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
+            0: "Sin fecha"
+        }
+        df_s['Mes'] = df_s['Mes_num'].map(nombres_meses)
+        
+        # Filtros
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        filtro_prod = col_f1.multiselect("Filtrar por Producto", productos_list)
+        filtro_mov = col_f2.selectbox("Movimiento", ["Todos", "Ingreso", "Egreso"], key="mov_stock_filter")
+        
+        anios_disponibles = sorted([str(y) for y in df_s['Año'].unique() if y > 0], reverse=True)
+        filtro_anio = col_f3.selectbox("Año", ["Todos"] + anios_disponibles, key="anio_stock_filter")
+        
+        filtro_mes = col_f4.selectbox("Mes", ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], key="mes_stock_filter")
+        
+        df_mostrar = df_s.copy()
+        if filtro_prod:
+            df_mostrar = df_mostrar[df_mostrar['Producto'].isin(filtro_prod)]
+        if filtro_mov != "Todos":
+            df_mostrar = df_mostrar[df_mostrar['Movimiento'] == filtro_mov]
+        if filtro_anio != "Todos":
+            df_mostrar = df_mostrar[df_mostrar['Año'] == int(filtro_anio)]
+        if filtro_mes != "Todos":
+            df_mostrar = df_mostrar[df_mostrar['Mes'] == filtro_mes]
+            
+        # Calcular métricas del período filtrado
+        ingresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Ingreso"]['Cantidad'].sum()
+        egresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Egreso"]['Cantidad'].sum()
+        balance_periodo = ingresos_periodo - egresos_periodo
+        
+        st.markdown("##### 📊 Balance del Período Filtrado:")
+        cm1, cm2, cm3 = st.columns(3)
+        cm1.metric("Ingresos en Período", f"{ingresos_periodo:,.1f} Uds")
+        cm2.metric("Egresos en Período", f"{egresos_periodo:,.1f} Uds")
+        cm3.metric("Balance Período", f"{balance_periodo:,.1f} Uds", delta=f"{balance_periodo:,.1f}", delta_color="normal" if balance_periodo >= 0 else "inverse")
+        
+        st.divider()
+        
+        # Formatear y mostrar la tabla ordenada
+        df_mostrar_sorted = df_mostrar.sort_values(by="Fecha", ascending=False).copy()
+        df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
+        st.dataframe(
+            df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino"]],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # --- SECCIÓN: EDITAR / ELIMINAR REGISTROS DE STOCK (SÓLO ADMIN) ---
+        st.divider()
+        st.subheader("✏️ Corregir o Eliminar Registro de Stock")
+        with st.expander("🛠️ Hacer ajustes en movimientos (Sólo Administrador)"):
+            opciones_editar = ["-- Seleccionar --"] + [f"ID {r['id']} | {r['Fecha']} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Uds)" for _, r in df_s.iterrows()]
+            registro_a_editar = st.selectbox("Seleccionar registro de stock a modificar", opciones_editar)
+            
+            if registro_a_editar != "-- Seleccionar --":
+                db_id = int(registro_a_editar.split(" | ")[0].replace("ID ", ""))
+                row = df_s[df_s['id'] == db_id].iloc[0]
+                
+                with st.form("form_edit_stock"):
+                    c_ed1, c_ed2 = st.columns(2)
+                    edit_fecha = c_ed1.date_input("Fecha", pd.to_datetime(row['Fecha']).date(), format="DD/MM/YYYY")
+                    edit_prod = c_ed1.text_input("Nombre del Producto / Repuesto", value=str(row['Producto']))
+                    edit_mov = c_ed2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row['Movimiento'] == "Ingreso" else 1)
+                    edit_cant = c_ed2.number_input("Cantidad", value=float(row['Cantidad']), min_value=0.0)
+                    edit_dest = st.text_input("Destino / Ubicación", value=str(row['Destino']))
+                    
+                    col_b1, col_b2 = st.columns(2)
+                    btn_save = col_b1.form_submit_button("💾 Guardar Cambios")
+                    btn_delete = col_b2.form_submit_button("🗑️ Eliminar Registro")
+                    
+                    if btn_save:
+                        if not edit_prod.strip():
+                            st.error("⚠️ El nombre del producto no puede estar vacío.")
+                        else:
+                            conn = get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                            UPDATE stock SET
+                                Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?
+                            WHERE id = ?
+                            """, (edit_fecha.strftime("%Y-%m-%d"), edit_prod.strip(), edit_mov, edit_cant, edit_dest.strip(), db_id))
+                            conn.commit()
+                            conn.close()
+                            st.success("¡Registro de stock actualizado con éxito!")
+                            st.rerun()
+                            
+                    if btn_delete:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM stock WHERE id = ?", (db_id,))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro de stock eliminado con éxito!")
+                        st.rerun()
+
+# --- 6. CONTROL HIDROCARBUROS (Corregido nombre del menú) ---
+elif menu == "⛽ Control Hidrocarburos":
+    st.header("⛽ Control de Hidrocarburos")
+    with st.form("f_hidro"):
+        c1, c2 = st.columns(2)
+        t_m = c1.selectbox("Movimiento", ["Ingreso", "Egreso"])
+        prod_h = c1.selectbox("Tipo", hidro_list, index=None, placeholder="Escribe para buscar tipo...")
+        cant_h = c2.number_input("Litros", min_value=0.0)
+        dest_h = c2.selectbox("Destino", ["Stock Central"] + maquinas_list, index=None, placeholder="Escribe para buscar destino...")
+        oper_h = st.selectbox("Responsable", empleados_list, index=None, placeholder="Escribe para buscar responsable...")
+        if st.form_submit_button("Cargar Registro"):
+            if not prod_h:
+                st.error("⚠️ Por favor selecciona el tipo de hidrocarburo.")
+            elif not dest_h:
+                st.error("⚠️ Por favor selecciona el destino.")
+            elif not oper_h:
+                st.error("⚠️ Por favor selecciona el responsable.")
+            else:
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (datetime.now().strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h))
+                conn.commit()
+                conn.close()
+                st.success("Registrado.")
+
+# --- 7. REPORTE DE MOVIMIENTOS DE HIDROCARBUROS ---
+elif menu == "📋 Reporte Movimientos Hidro":
+    st.header("📋 Detalle de Movimientos de Hidrocarburos")
+    
+    # Cargar datos
+    df_h = cargar_datos_db("hidrocarburos")
+    
+    if df_h.empty:
+        st.warning("No se encontraron registros de movimientos de hidrocarburos.")
+    else:
+        # Cálculo de Stock Remanente para el encabezado
+        df_h['Aux_Cant'] = df_h.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
+        stock_actual = df_h.groupby('Producto')['Aux_Cant'].sum().reset_index()
+        stock_actual.columns = ['Producto', 'Stock Remanente (Ltrs)']
+
+        # Mostrar Resumen de Stock
+        st.subheader("📦 Resumen de Stock Remanente")
+        st.dataframe(stock_actual, use_container_width=True)
+
+        st.divider()
+
+        # Mostrar Detalle Completo
+        st.subheader("🔍 Historial Detallado")
+        
+        # Parsear fecha a datetime para filtros de mes y año
+        df_h['Fecha_dt'] = pd.to_datetime(df_h['Fecha'], errors='coerce')
+        df_h['Año'] = df_h['Fecha_dt'].dt.year.fillna(0).astype(int)
+        df_h['Mes_num'] = df_h['Fecha_dt'].dt.month.fillna(0).astype(int)
+        
+        nombres_meses = {
+            1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+            7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
+            0: "Sin fecha"
+        }
+        df_h['Mes'] = df_h['Mes_num'].map(nombres_meses)
+        
+        # Filtros opcionales para facilitar la lectura
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        filtro_prod = col_f1.multiselect("Filtrar por Producto", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], default=["Gas-oil"])
+        filtro_mov = col_f2.selectbox("Movimiento", ["Todos", "Ingreso", "Egreso"])
+        
+        anios_disponibles = sorted([str(y) for y in df_h['Año'].unique() if y > 0], reverse=True)
+        filtro_anio = col_f3.selectbox("Año", ["Todos"] + anios_disponibles)
+        
+        filtro_mes = col_f4.selectbox("Mes", ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"])
+
+        df_mostrar = df_h.copy()
+        if filtro_prod:
+            df_mostrar = df_mostrar[df_mostrar['Producto'].isin(filtro_prod)]
+        if filtro_mov != "Todos":
+            df_mostrar = df_mostrar[df_mostrar['Movimiento'] == filtro_mov]
+        if filtro_anio != "Todos":
+            df_mostrar = df_mostrar[df_mostrar['Año'] == int(filtro_anio)]
+        if filtro_mes != "Todos":
+            df_mostrar = df_mostrar[df_mostrar['Mes'] == filtro_mes]
+
+        # Calcular métricas del período filtrado (Las "otras métricas" solicitadas)
+        ingresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Ingreso"]['Cantidad'].sum()
+        egresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Egreso"]['Cantidad'].sum()
+        balance_periodo = ingresos_periodo - egresos_periodo
+        
+        st.markdown("##### 📊 Balance del Período Filtrado:")
+        cm1, cm2, cm3 = st.columns(3)
+        cm1.metric("Ingresos en Período", f"{ingresos_periodo:,.1f} Lts/Uds")
+        cm2.metric("Consumos en Período", f"{egresos_periodo:,.1f} Lts/Uds")
+        cm3.metric("Balance Período", f"{balance_periodo:,.1f} Lts/Uds", delta=f"{balance_periodo:,.1f}", delta_color="normal" if balance_periodo >= 0 else "inverse")
+        
+        st.divider()
+
+        # Formatear y mostrar la tabla ordenada
+        df_mostrar_sorted = df_mostrar.sort_values(by="Fecha", ascending=False).copy()
+        df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
+        st.dataframe(
+            df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # --- SECCIÓN: EDITAR / ELIMINAR REGISTROS DE HIDROCARBUROS (SÓLO ADMIN) ---
+        st.divider()
+        st.subheader("✏️ Corregir o Eliminar Registro de Hidrocarburos")
+        with st.expander("🛠️ Hacer ajustes en movimientos (Sólo Administrador)"):
+            opciones_editar_h = ["-- Seleccionar --"] + [f"ID {r['id']} | {r['Fecha']} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts)" for _, r in df_h.iterrows()]
+            registro_a_editar_h = st.selectbox("Seleccionar registro de hidrocarburos a modificar", opciones_editar_h)
+            
+            if registro_a_editar_h != "-- Seleccionar --":
+                db_id_h = int(registro_a_editar_h.split(" | ")[0].replace("ID ", ""))
+                row_h = df_h[df_h['id'] == db_id_h].iloc[0]
+                
+                with st.form("form_edit_hidro"):
+                    c_edh1, c_edh2 = st.columns(2)
+                    edit_fecha_h = c_edh1.date_input("Fecha", pd.to_datetime(row_h['Fecha']).date(), format="DD/MM/YYYY")
+                    edit_prod_h = c_edh1.selectbox("Tipo de Hidrocarburo", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], 
+                                                   index=["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"].index(row_h['Producto']) if row_h['Producto'] in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"] else 0)
+                    edit_mov_h = c_edh2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row_h['Movimiento'] == "Ingreso" else 1)
+                    edit_cant_h = c_edh2.number_input("Cantidad (Litros)", value=float(row_h['Cantidad']), min_value=0.0)
+                    
+                    edit_dest_h = st.selectbox("Destino", ["Stock Central"] + maquinas_list, 
+                                               index=(["Stock Central"] + maquinas_list).index(row_h['Destino']) if row_h['Destino'] in (["Stock Central"] + maquinas_list) else None)
+                    edit_oper_h = st.selectbox("Responsable", empleados_list, 
+                                               index=empleados_list.index(row_h['Operario']) if row_h['Operario'] in empleados_list else None)
+                    
+                    col_bh1, col_bh2 = st.columns(2)
+                    btn_save_h = col_bh1.form_submit_button("💾 Guardar Cambios")
+                    btn_delete_h = col_bh2.form_submit_button("🗑️ Eliminar Registro")
+                    
+                    if btn_save_h:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                        UPDATE hidrocarburos SET
+                            Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?
+                        WHERE id = ?
+                        """, (edit_fecha_h.strftime("%Y-%m-%d"), edit_prod_h, edit_mov_h, edit_cant_h, edit_dest_h, edit_oper_h, db_id_h))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro de hidrocarburos actualizado con éxito!")
+                        st.rerun()
+                        
+                    if btn_delete_h:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM hidrocarburos WHERE id = ?", (db_id_h,))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro de hidrocarburos eliminado con éxito!")
+                        st.rerun()
+
+# --- 8. CONFIGURACIÓN (CON OPCIÓN DE BORRAR) ---
+elif menu == "⚙️ Configuración":
+    st.header("⚙️ Configuración del Sistema")
+    
+    tab_datos_maestros, tab_usuarios = st.tabs(["📊 Datos Maestros", "👥 Gestión de Usuarios"])
+    
+    with tab_datos_maestros:
+        st.header("⚙️ Configuración de Datos Maestros")
+        col1, col2, col3 = st.columns(3)
+    
+        with col1:
+            st.subheader("🚜 Máquinas")
+            nueva_m = st.text_input("Añadir Nueva Máquina")
+            if st.button("➕ Guardar Máquina"):
+                if nueva_m:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("INSERT INTO maquinas (Nombre) VALUES (?)", (nueva_m,))
+                        conn.commit()
+                    except sqlite3.IntegrityError:
+                        st.error("Esa máquina ya está registrada.")
+                    finally:
+                        conn.close()
+                    st.rerun()
+        
+            st.divider()
+            if maquinas_list:
+                m_borrar = st.selectbox("Seleccionar Máquina para borrar", ["-- Seleccionar --"] + maquinas_list)
+                if st.button("🗑️ Borrar Máquina Seleccionada"):
+                    if m_borrar != "-- Seleccionar --":
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM maquinas WHERE Nombre = ?", (m_borrar,))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+                    
+            st.divider()
+            st.subheader("📋 Generar Código QR")
+        
+            # Cargar URL externa guardada
+            import json
+            config_file = "config_url.json"
+            url_externa_previa = ""
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r") as f:
+                        data = json.load(f)
+                        url_externa_previa = data.get("url_externa", "")
+                except:
+                    pass
+                
+            url_externa = st.text_input(
+                "🌐 URL de Acceso Externo (Opcional)", 
+                value=url_externa_previa, 
+                placeholder="Ej: https://areneras.ngrok-free.app o https://areneras.loca.lt"
+            )
+        
+            # Guardar si cambió
+            if url_externa != url_externa_previa:
+                try:
+                    with open(config_file, "w") as f:
+                        json.dump({"url_externa": url_externa.strip()}, f)
+                except:
+                    pass
+                
+            if maquinas_list:
+                m_qr = st.selectbox("Seleccionar Máquina para QR", ["-- Seleccionar --"] + maquinas_list)
+                if m_qr != "-- Seleccionar --":
+                    # Determinar URL base
+                    if url_externa.strip():
+                        base_url = url_externa.strip().rstrip("/")
+                    else:
+                        def obtener_ip_local():
+                            try:
+                                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                                s.connect(("8.8.8.8", 80))
+                                ip = s.getsockname()[0]
+                                s.close()
+                                return ip
+                            except:
+                                return "localhost"
+                        ip_local = obtener_ip_local()
+                        base_url = f"http://{ip_local}:8501"
+                    
+                    url_qr = f"{base_url}/?qr_maq={urllib.parse.quote(m_qr)}"
+                    api_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(url_qr)}"
+                
+                    st.image(api_qr, caption=f"Código QR: {m_qr}")
+                    st.write(f"🔗 **Enlace QR:** `{url_qr}`")
+                    st.info("💡 Pegue este código en la máquina física. Los técnicos podrán escanearlo desde sus celulares con redes móviles (4G/5G) o cualquier red de internet.")
+                
+                    st.markdown("""
+                    > **¿Cómo configurar el acceso desde internet (redes móviles / 4G)?**
+                    >
+                    > Como la base de datos y la aplicación corren en tu computadora, para que un celular con datos móviles (fuera de la red de la planta) acceda, se debe crear un túnel a internet:
+                    >
+                    > 1. Abre la consola de Windows y ejecuta:
+                    >    `npx localtunnel --port 8501` o `ngrok http 8501`.
+                    > 2. Copia la dirección web pública que te brinde (ej: `https://areneras-la-cruz.loca.lt`).
+                    > 3. Pégala en el campo **URL de Acceso Externo** de arriba.
+                    > 4. Los códigos QR que generes usarán esa dirección y funcionarán en cualquier parte del mundo.
+                    """)
+
+        with col2:
+            st.subheader("👤 Personal")
+            nueva_p = st.text_input("Añadir Nuevo Empleado")
+            if st.button("➕ Guardar Empleado"):
+                if nueva_p:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("INSERT INTO empleados (Nombre) VALUES (?)", (nueva_p,))
+                        conn.commit()
+                    except sqlite3.IntegrityError:
+                        st.error("Ese empleado ya está registrado.")
+                    finally:
+                        conn.close()
+                    st.rerun()
+        
+            st.divider()
+            if empleados_list:
+                p_borrar = st.selectbox("Seleccionar Empleado para borrar", ["-- Seleccionar --"] + empleados_list)
+                if st.button("🗑️ Borrar Empleado Selected"):
+                    if p_borrar != "-- Seleccionar --":
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM empleados WHERE Nombre = ?", (p_borrar,))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+
+        with col3:
+            st.subheader("📦 Repuestos")
+            nuevo_s = st.text_input("Añadir Nuevo Producto")
+            if st.button("➕ Guardar Producto"):
+                if nuevo_s:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("INSERT INTO productos (Nombre) VALUES (?)", (nuevo_s,))
+                        conn.commit()
+                    except sqlite3.IntegrityError:
+                        st.error("Ese producto ya está registrado.")
+                    finally:
+                        conn.close()
+                    st.rerun()
+        
+            st.divider()
+            if productos_list:
+                s_borrar = st.selectbox("Seleccionar Producto para borrar", ["-- Seleccionar --"] + productos_list)
+                if st.button("🗑️ Borrar Producto Selected"):
+                    if s_borrar != "-- Seleccionar --":
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM productos WHERE Nombre = ?", (s_borrar,))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+
+
+    with tab_usuarios:
+        st.subheader("👥 Gestión de Usuarios y Permisos")
+        CONTRASENA_MAESTRA = "RozasCruzMaster2026!"
+        
+        pass_maestra = st.text_input("Contraseña Maestra para gestionar usuarios", type="password", key="pass_maestra_chk")
+        
+        if pass_maestra:
+            if pass_maestra == CONTRASENA_MAESTRA:
+                st.success("🔓 Acceso concedido.")
+                
+                st.subheader("➕ Crear Nuevo Usuario")
+                with st.form("form_nuevo_usuario"):
+                    nuevo_u = st.text_input("Usuario / Técnico responsable")
+                    nuevo_p = st.text_input("Contraseña de Carga", type="password")
+                    nuevo_rj = st.text_input("Puesto de Trabajo (Planta y función en la empresa)", placeholder="Ej: Planta San Lorenzo - Mecánico")
+                    nuevo_r = st.selectbox("Rol de Acceso", ["Operario", "Administrador"])
+                    
+                    guardar_u = st.form_submit_button("💾 Guardar Nuevo Usuario")
+                    if guardar_u:
+                        if not nuevo_u.strip() or not nuevo_p.strip():
+                            st.error("⚠️ Por favor completa el usuario y la contraseña.")
+                        else:
+                            import uuid
+                            token_u = uuid.uuid4().hex
+                            
+                            # Conectar e insertar
+                            import sqlite3
+                            conn = sqlite3.connect("gestion_planta.db")
+                            cursor = conn.cursor()
+                            try:
+                                cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto) VALUES (?, ?, ?, ?, ?)",
+                                               (nuevo_u.strip(), nuevo_p.strip(), token_u, nuevo_r, nuevo_rj.strip()))
+                                conn.commit()
+                                st.success(f"🎉 Usuario '{nuevo_u}' registrado correctamente.")
+                            except sqlite3.IntegrityError:
+                                st.error("⚠️ Ese nombre de usuario ya existe.")
+                            finally:
+                                conn.close()
+                            st.rerun()
+                
+                st.divider()
+                st.subheader("👥 Usuarios del Sistema")
+                import sqlite3
+                conn = sqlite3.connect("gestion_planta.db")
+                import pandas as pd
+                df_users = pd.read_sql_query("SELECT Usuario, Rol, Password, Puesto FROM usuarios", conn)
+                conn.close()
+                
+                if df_users.empty:
+                    st.info("No hay usuarios registrados.")
+                else:
+                    st.dataframe(df_users[["Usuario", "Rol", "Puesto"]], use_container_width=True, hide_index=True)
+                    
+                    # Sección: Editar Usuario
+                    st.divider()
+                    st.subheader("📝 Editar Usuario")
+                    u_a_editar = st.selectbox("Seleccionar usuario a editar", ["-- Seleccionar --"] + list(df_users["Usuario"]))
+                    if u_a_editar != "-- Seleccionar --":
+                        user_row = df_users[df_users["Usuario"] == u_a_editar].iloc[0]
+                        current_rol = user_row["Rol"]
+                        current_pass = user_row["Password"]
+                        current_puesto = user_row["Puesto"] if pd.notna(user_row["Puesto"]) else ""
+                        
+                        with st.form("form_editar_usuario"):
+                            edit_u = st.text_input("Nombre de Usuario / Nombre de Técnico", value=u_a_editar)
+                            edit_p = st.text_input("Contraseña de Carga", value=current_pass, type="password")
+                            edit_rj = st.text_input("Puesto de Trabajo", value=current_puesto)
+                            edit_r = st.selectbox("Rol de Acceso", ["Operario", "Administrador"], index=0 if current_rol == "Operario" else 1)
+                            
+                            guardar_cambios = st.form_submit_button("💾 Guardar Cambios")
+                            if guardar_cambios:
+                                if not edit_u.strip() or not edit_p.strip():
+                                    st.error("⚠️ Por favor completa el usuario y la contraseña.")
+                                else:
+                                    conn = sqlite3.connect("gestion_planta.db")
+                                    cursor = conn.cursor()
+                                    try:
+                                        # Prohibir cambiar el nombre del admin por defecto
+                                        if u_a_editar == "admin" and edit_u.strip() != "admin":
+                                            st.error("⚠️ No se puede cambiar el nombre del usuario administrador principal ('admin').")
+                                        else:
+                                            cursor.execute("""
+                                            UPDATE usuarios SET
+                                                Usuario = ?, Password = ?, Rol = ?, Puesto = ?
+                                            WHERE Usuario = ?
+                                            """, (edit_u.strip(), edit_p.strip(), edit_r, edit_rj.strip(), u_a_editar))
+                                            conn.commit()
+                                            st.success(f"🎉 Cambios guardados para el usuario '{edit_u.strip()}'.")
+                                            st.rerun()
+                                    except sqlite3.IntegrityError:
+                                        st.error("⚠️ Ese nombre de usuario ya existe en otro registro.")
+                                    finally:
+                                        conn.close()
+                    
+                    # Sección: Eliminar Usuario
+                    st.divider()
+                    st.subheader("🗑️ Eliminar Usuario")
+                    u_a_borrar = st.selectbox("Seleccionar usuario a eliminar", ["-- Seleccionar --"] + list(df_users["Usuario"]))
+                    if st.button("🗑️ Eliminar permanentemente", use_container_width=True):
+                        if u_a_borrar != "-- Seleccionar --":
+                            if u_a_borrar == "admin":
+                                st.error("⚠️ No se puede eliminar el usuario administrador principal ('admin').")
+                            else:
+                                conn = sqlite3.connect("gestion_planta.db")
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM usuarios WHERE Usuario = ?", (u_a_borrar,))
+                                conn.commit()
+                                conn.close()
+                                st.success(f"Usuario '{u_a_borrar}' eliminado con éxito.")
+                                st.rerun()
+            else:
+                st.error("❌ Contraseña Maestra incorrecta.")
+
+# --- 9. EXPORTAR A EXCEL (Corregido nombre del menú) ---
+elif menu == "📥 Exportar Excel":
+    st.header("📥 Descargar Reporte Completo")
+    st.write("Presione el botón para generar un archivo Excel con todas las tablas de la base de datos.")
+    
+    if st.button("Generar Archivo Excel"):
+        tablas = {
+            "maquinas": "maquinas",
+            "empleados": "empleados",
+            "productos": "productos",
+            "mantenimientos": "mantenimientos",
+            "planificacion": "planificacion",
+            "stock": "stock",
+            "hidrocarburos": "hidrocarburos",
+            "controles_diarios": "controles_diarios"
+        }
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for clave_nombre, tabla_sql in tablas.items():
+                df = cargar_datos_db(tabla_sql)
+                if not df.empty:
+                    df.to_excel(writer, sheet_name=clave_nombre, index=False)
+        
+        st.download_button(
+            label="💾 Descargar Excel",
+            data=output.getvalue(),
+            file_name=f"Reporte_Gestion_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
