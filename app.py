@@ -119,6 +119,111 @@ def formatear_fecha_hora_visible(fechahora_str):
     except:
         return str(fechahora_str)
 
+def generar_pdf_hidrocarburos(df_reporte, filtro_prod_str, filtro_mov_str, filtro_anio_str, filtro_mes_str, ingresos, egresos, balance, usuario_emisor=""):
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        return b""
+
+    class PDF(FPDF):
+        def header(self):
+            self.set_font('Helvetica', 'B', 14)
+            self.set_text_color(22, 36, 71)
+            self.cell(0, 8, 'CRUZ Y ROZAS S.A.', new_x='LMARGIN', new_y='NEXT', align='C')
+            self.set_font('Helvetica', 'B', 10)
+            self.set_text_color(100, 100, 100)
+            self.cell(0, 6, 'Gestion de Planta - Reporte de Movimientos de Hidrocarburos', new_x='LMARGIN', new_y='NEXT', align='C')
+            self.set_draw_color(52, 152, 219)
+            self.set_line_width(0.8)
+            self.line(10, 24, 200, 24)
+            self.ln(6)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Helvetica', 'I', 8)
+            self.set_text_color(120, 120, 120)
+            self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Cruz y Rozas S.A.', align='C')
+
+    pdf = PDF()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    fecha_emision = datetime.now().strftime('%d/%m/%Y %H:%M')
+    emisor_txt = usuario_emisor if usuario_emisor else 'Administracion'
+    
+    def clean_txt(t):
+        if not t:
+            return ""
+        return str(t).encode('latin-1', 'replace').decode('latin-1')
+
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(100, 5, f'Fecha de Emision: {fecha_emision}')
+    pdf.cell(90, 5, clean_txt(f'Emitido por: {emisor_txt}'), new_x='LMARGIN', new_y='NEXT', align='R')
+    pdf.ln(2)
+
+    pdf.set_fill_color(240, 243, 246)
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_text_color(22, 36, 71)
+    filtro_lbl = clean_txt(f" FILTROS: Producto: {filtro_prod_str} | Movimiento: {filtro_mov_str} | Periodo: {filtro_mes_str} / {filtro_anio_str}")
+    pdf.cell(0, 6, filtro_lbl, fill=True, new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(3)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_fill_color(230, 247, 235)
+    pdf.set_text_color(40, 140, 60)
+    pdf.cell(61, 9, f' Ingresos: {ingresos:,.1f} Lts', border=1, fill=True, align='C')
+    pdf.cell(3, 9, '')
+    pdf.set_fill_color(253, 237, 237)
+    pdf.set_text_color(180, 40, 40)
+    pdf.cell(61, 9, f' Consumos: {egresos:,.1f} Lts', border=1, fill=True, align='C')
+    pdf.cell(3, 9, '')
+    pdf.set_fill_color(235, 243, 250)
+    pdf.set_text_color(20, 80, 160)
+    pdf.cell(62, 9, f' Balance: {balance:,.1f} Lts', border=1, fill=True, align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(5)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_fill_color(22, 36, 71)
+    pdf.set_text_color(255, 255, 255)
+    
+    col_w = [24, 38, 22, 26, 45, 35]
+    headers = ['Fecha', 'Producto', 'Movimiento', 'Cantidad', 'Destino', 'Responsable']
+    
+    for i, h in enumerate(headers):
+        pdf.cell(col_w[i], 7, h, border=1, fill=True, align='C')
+    pdf.ln()
+
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_text_color(30, 30, 30)
+    
+    fill_row = False
+    for _, r in df_reporte.iterrows():
+        pdf.set_fill_color(248, 249, 250) if fill_row else pdf.set_fill_color(255, 255, 255)
+        
+        fecha_val = clean_txt(str(r.get('Fecha', '')))
+        prod_val = clean_txt(str(r.get('Producto', ''))[:22])
+        mov_val = clean_txt(str(r.get('Movimiento', '')))
+        try:
+            cant_num = float(r.get('Cantidad', 0))
+        except:
+            cant_num = 0.0
+        cant_val = f'{cant_num:,.1f} Lts'
+        dest_val = clean_txt(str(r.get('Destino', ''))[:25])
+        oper_val = clean_txt(str(r.get('Operario', ''))[:20])
+
+        pdf.cell(col_w[0], 6, fecha_val, border=1, fill=True, align='C')
+        pdf.cell(col_w[1], 6, prod_val, border=1, fill=True, align='L')
+        pdf.cell(col_w[2], 6, mov_val, border=1, fill=True, align='C')
+        pdf.cell(col_w[3], 6, cant_val, border=1, fill=True, align='R')
+        pdf.cell(col_w[4], 6, dest_val, border=1, fill=True, align='L')
+        pdf.cell(col_w[5], 6, oper_val, border=1, fill=True, align='L')
+        pdf.ln()
+        fill_row = not fill_row
+
+    return bytes(pdf.output())
+
 def buscar_coincidencia_empleado(usuario, lista_empleados):
     if not usuario or not lista_empleados:
         return None
@@ -2062,10 +2167,51 @@ elif menu == "📋 Reporte Movimientos Hidro":
         # Formatear y mostrar la tabla ordenada
         df_mostrar_sorted = df_mostrar.sort_values(by="Fecha", ascending=False).copy()
         df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
+
         st.dataframe(
             df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]],
             use_container_width=True,
             hide_index=True
+        )
+
+        st.divider()
+        st.markdown("##### 📥 Exportar Registros Filtrados para Administración:")
+        c_exp1, c_exp2 = st.columns(2)
+        
+        # 1. Excel
+        output_h = BytesIO()
+        excel_df_h = df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]].copy()
+        with pd.ExcelWriter(output_h, engine="openpyxl") as writer:
+            excel_df_h.to_excel(writer, index=False, sheet_name="Movimientos Hidrocarburos")
+        output_h.seek(0)
+        
+        c_exp1.download_button(
+            "📊 Exportar a Excel (.xlsx)",
+            data=output_h.getvalue(),
+            file_name=f"Reporte_Hidrocarburos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+        # 2. PDF Imprimible
+        pdf_bytes_h = generar_pdf_hidrocarburos(
+            df_mostrar_sorted,
+            filtro_prod_str=", ".join(filtro_prod) if filtro_prod else "Todos",
+            filtro_mov_str=filtro_mov,
+            filtro_anio_str=str(filtro_anio),
+            filtro_mes_str=filtro_mes,
+            ingresos=ingresos_periodo,
+            egresos=egresos_periodo,
+            balance=balance_periodo,
+            usuario_emisor=st.session_state.get("usuario", "")
+        )
+        
+        c_exp2.download_button(
+            "📄 Exportar Reporte a PDF (.pdf)",
+            data=pdf_bytes_h,
+            file_name=f"Reporte_Hidrocarburos_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
         )
 
         # --- SECCIÓN: EDITAR / ELIMINAR REGISTROS DE HIDROCARBUROS (SÓLO ADMIN) ---
