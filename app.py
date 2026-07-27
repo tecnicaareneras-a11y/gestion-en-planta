@@ -450,7 +450,7 @@ if not st.session_state["usuario"]:
         t_param = q_params["tkn"]
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT Usuario FROM usuarios WHERE Usuario = ? AND Token = ?", (u_param, t_param))
+        cursor.execute("SELECT Usuario, Rol, Puesto FROM usuarios WHERE Usuario = ? AND Token = ?", (u_param, t_param))
         match = cursor.fetchone()
         conn.close()
         if match:
@@ -1419,7 +1419,7 @@ elif menu == "📋 Reporte Mant. Realizado":
 
             # Obtener base_url para links
             config_file = "config_url.json"
-            base_url = "http://localhost:8501"
+            base_url = "https://gestion-en-planta-adlc.streamlit.app"
             if os.path.exists(config_file):
                 try:
                     with open(config_file, "r") as f:
@@ -1432,8 +1432,9 @@ elif menu == "📋 Reporte Mant. Realizado":
 
             # Agregar columna virtual para enlace a nueva pestaña en la visualización
             export_df = df_filtrado[["N° Registro"]].copy()
-            user_token = st.session_state.get("token", "")
-            export_df["Ficha"] = df_filtrado["id"].apply(lambda x: f"{base_url}/?id={x}&usr={st.session_state['usuario']}&tkn={user_token}")
+            user_token = urllib.parse.quote(st.session_state.get("token", ""))
+            user_usr = urllib.parse.quote(st.session_state.get("usuario", ""))
+            export_df["Ficha"] = df_filtrado["id"].apply(lambda x: f"{base_url}/?id={x}&usr={user_usr}&tkn={user_token}")
             export_df["Fecha"] = df_filtrado["Fecha"].apply(formatear_fecha_visible)
             for col in ["Deposito", "Maquina", "Operario", "Tipo", "Inicio", "Fin", "Horimetro", "Detalle"]:
                 export_df[col] = df_filtrado[col]
@@ -1483,7 +1484,7 @@ elif menu == "📋 Reporte Mant. Realizado":
                 db_id = mapping_opciones[seleccion]
                 
                 # Botón para abrir detalle completo en nueva pestaña
-                st.link_button("🔎 Abrir Ficha Detallada en Nueva Pestaña", f"/?id={db_id}", use_container_width=True)
+                st.link_button("🔎 Abrir Ficha Detallada en Nueva Pestaña", f"{base_url}/?id={db_id}&usr={user_usr}&tkn={user_token}", use_container_width=True)
                 st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
                 
                 # Traer el registro fresco directamente por ID
@@ -1635,7 +1636,7 @@ elif menu == "📋 Reporte Mant. Realizado":
             
             # Obtener base_url para links
             config_file = "config_url.json"
-            base_url = "http://localhost:8501"
+            base_url = "https://gestion-en-planta-adlc.streamlit.app"
             if os.path.exists(config_file):
                 try:
                     with open(config_file, "r") as f:
@@ -1648,8 +1649,9 @@ elif menu == "📋 Reporte Mant. Realizado":
                     
             # Agregar columna de Enlace Ficha pre-autenticada
             df_cd_tabla = pd.DataFrame()
-            user_token = st.session_state.get("token", "")
-            df_cd_tabla["Ficha"] = df_cd_sorted["id"].apply(lambda x: f"{base_url}/?id_chk={x}&usr={st.session_state['usuario']}&tkn={user_token}")
+            user_token = urllib.parse.quote(st.session_state.get("token", ""))
+            user_usr = urllib.parse.quote(st.session_state.get("usuario", ""))
+            df_cd_tabla["Ficha"] = df_cd_sorted["id"].apply(lambda x: f"{base_url}/?id_chk={x}&usr={user_usr}&tkn={user_token}")
             
             # Copiar las demás columnas en orden
             columnas_ordenadas = ["id", "Fecha", "Maquina", "Tecnico", "Deposito", "Horimetro_KM"]
