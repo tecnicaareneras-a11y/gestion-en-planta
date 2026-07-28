@@ -1262,262 +1262,208 @@ if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
     """, unsafe_allow_html=True)
     st.stop()
 
-# --- 1. TABLERO DE CONTROL Y REPORTES (FRACTTAL ONE CMMS STYLE) ---
+# --- 1. TABLERO DE CONTROL Y REPORTES (FRACTTAL ONE CMMS COMPACTO) ---
 if menu == "🏠 Inicio - Tablero General":
-    # Fracttal Header Banner
+    # Header Banner Compacto
     st.markdown("""
     <div class="fracttal-header">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
             <div>
-                <h2 class="fracttal-title">🏗️ ARENERAS DE LA CRUZ Y ROZAS S.A.</h2>
-                <div class="fracttal-subtitle">Gestión Técnica de Mantenimiento & Control de Flota de Planta (CMMS)</div>
+                <h3 class="fracttal-title">🏗️ ARENERAS DE LA CRUZ Y ROZAS S.A.</h3>
+                <div class="fracttal-subtitle">Gestión Técnica de Mantenimiento & Control de Flota (CMMS)</div>
             </div>
             <div style="text-align:right;">
-                <span class="badge-operativo">🟢 Sistema Operativo Activo</span>
-                <div style="font-size:12px; color:#94a3b8; margin-top:4px;">Disponibilidad Global: <b>98.4%</b></div>
+                <span class="badge-operativo">🟢 Sistema Operativo</span>
+                <span style="font-size:12px; color:#94a3b8; margin-left:8px;">Disponibilidad Flota: <b>98.4%</b></span>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Cargar datos
+    # Cargar datos una sola vez
     df_mant = cargar_datos_db("mantenimientos")
     df_stock = cargar_datos_db("stock")
     df_hidro = cargar_datos_db("hidrocarburos")
     
-    meses_nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-    anios_disponibles = list(range(datetime.now().year - 2, datetime.now().year + 3))
+    # Cálculo de métricas globales
+    total_mants_glob = len(df_mant) if not df_mant.empty else 0
+    cant_prev_glob = len(df_mant[df_mant['Tipo'] == 'Preventivo']) if not df_mant.empty else 0
+    cant_corr_glob = len(df_mant[df_mant['Tipo'] == 'Correctivo']) if not df_mant.empty else 0
     
-    # --- DISTRIBUCIÓN DE LAYOUT EN DOS COLUMNAS ---
-    col_izq, col_der = st.columns([4, 6])
-    
-    with col_izq:
-        st.subheader("📅 Período de Análisis")
-        filtro_tiempo = st.radio("Filtro:", ["Histórico Completo", "Filtrar por Mes/Año"], horizontal=True, label_visibility="collapsed")
-        
-        # Filtros de mes y año en columnas pequeñas
-        if filtro_tiempo == "Filtrar por Mes/Año":
-            col_m, col_a = st.columns(2)
-            mes_seleccionado = col_m.selectbox("Mes", meses_nombres, index=datetime.now().month - 1, label_visibility="collapsed")
-            mes_sel = meses_nombres.index(mes_seleccionado) + 1
-            anio_sel = col_a.selectbox("Año", anios_disponibles, index=2, label_visibility="collapsed")
-            
-            # Filtrar mantenimientos por mes/año
-            if not df_mant.empty:
-                df_mant['Fecha_dt'] = pd.to_datetime(df_mant['Fecha'], errors='coerce')
-                df_mant_filtered = df_mant[(df_mant['Fecha_dt'].dt.month == mes_sel) & (df_mant['Fecha_dt'].dt.year == anio_sel)]
-            else:
-                df_mant_filtered = df_mant.copy()
-                
-            # Filtrar stock por mes/año
-            if not df_stock.empty:
-                df_stock['Fecha_dt'] = pd.to_datetime(df_stock['Fecha'], errors='coerce')
-                df_stock_filtered = df_stock[(df_stock['Fecha_dt'].dt.month == mes_sel) & (df_stock['Fecha_dt'].dt.year == anio_sel)]
-            else:
-                df_stock_filtered = df_stock.copy()
-        else:
-            df_mant_filtered = df_mant.copy()
-            df_stock_filtered = df_stock.copy()
-            mes_sel, anio_sel = None, None
-            
-        # Calcular KPIs dinámicos
-        total_mants = len(df_mant_filtered)
-        cant_preventivo = len(df_mant_filtered[df_mant_filtered['Tipo'] == 'Preventivo']) if not df_mant_filtered.empty else 0
-        cant_correctivo = len(df_mant_filtered[df_mant_filtered['Tipo'] == 'Correctivo']) if not df_mant_filtered.empty else 0
-        
-        # Calcular horas de taller estimadas
-        def calcular_horas_totales(df):
-            if df.empty:
+    def calcular_horas_totales(df):
+        if df.empty:
+            return 0.0
+        def diff_horas(row):
+            try:
+                h_i, m_i = map(int, str(row['Inicio']).split(':'))
+                h_f, m_f = map(int, str(row['Fin']).split(':'))
+                diff = (h_f * 60 + m_f) - (h_i * 60 + m_i)
+                return max(0.0, diff / 60.0)
+            except:
                 return 0.0
-            def diff_horas(row):
-                try:
-                    h_i, m_i = map(int, str(row['Inicio']).split(':'))
-                    h_f, m_f = map(int, str(row['Fin']).split(':'))
-                    diff = (h_f * 60 + m_f) - (h_i * 60 + m_i)
-                    return max(0.0, diff / 60.0)
-                except:
-                    return 0.0
-            return df.apply(diff_horas, axis=1).sum()
-            
-        horas_taller = calcular_horas_totales(df_mant_filtered)
-        maquinas_intervenidas = df_mant_filtered['Maquina'].nunique() if not df_mant_filtered.empty else 0
+        return df.apply(diff_horas, axis=1).sum()
         
-        # Cálculo histórico acumulado de combustibles
-        stock_combustible = {}
-        if not df_hidro.empty:
-            df_hidro['Val'] = df_hidro.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
-            stock_combustible = df_hidro.groupby('Producto')['Val'].sum().to_dict()
-            
-        st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
-        st.subheader("🚜 Top 10 Máquinas Intervenidas")
-        if not df_mant_filtered.empty:
-            df_grouped = df_mant_filtered.groupby(['Maquina', 'Tipo']).size().reset_index(name='Cantidad')
-            top_machines = df_mant_filtered['Maquina'].value_counts().head(10).index
-            df_top = df_grouped[df_grouped['Maquina'].isin(top_machines)]
-            
-            import plotly.express as px
-            fig_bar = px.bar(
-                df_top, 
-                x='Maquina', 
-                y='Cantidad', 
-                color='Tipo',
-                color_discrete_map={'Preventivo': '#10b981', 'Correctivo': '#ef4444'},
-                barmode='stack',
-                category_orders={"Maquina": list(top_machines)}
-            )
-            fig_bar.update_layout(
-                height=300,
-                xaxis_title=None,
-                yaxis_title=None,
-                margin=dict(l=10, r=10, t=10, b=10),
-                paper_bgcolor='rgba(0,0,0,0)', 
-                plot_bgcolor='rgba(0,0,0,0)',
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+    horas_taller_glob = calcular_horas_totales(df_mant)
+    maquinas_interven_glob = df_mant['Maquina'].nunique() if not df_mant.empty else 0
+    
+    stock_combustible = {}
+    if not df_hidro.empty:
+        df_hidro['Val'] = df_hidro.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
+        stock_combustible = df_hidro.groupby('Producto')['Val'].sum().to_dict()
+        
+    stock_gasoil_val = stock_combustible.get('Gas-oil', 0.0)
+
+    # 1. FILA DE METRICAS COMPACTAS (4 COLUMNAS EN 1 SOLA FILA ARRIBA)
+    col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+    col_k1.metric("Mantenimientos Totales", total_mants_glob)
+    col_k2.metric("Horas Taller Acumuladas", f"{horas_taller_glob:,.1f} hs")
+    col_k3.metric("Stock Remanente Gas-oil", f"{stock_gasoil_val:,.0f} Lts")
+    col_k4.metric("Equipos Intervenidos", maquinas_interven_glob)
+    
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+
+    # 2. PESTAÑAS ORGANIZADAS Y CENTRADAS (EVITA ESCROLAR)
+    tab_matrix, tab_analytics, tab_hidro_summary = st.tabs([
+        "🚜 Matriz Visual de Activos & Flota",
+        "📊 Analítica de Mantenimiento & KPIs",
+        "⛽ Resumen Único de Hidrocarburos"
+    ])
+
+    # --- PESTAÑA 1: MATRIZ VISUAL DE ACTIVOS (GRILLA COMPACTA DE 4 COLUMNAS) ---
+    with tab_matrix:
+        c_search1, c_search2 = st.columns([3, 1])
+        search_asset = c_search1.text_input("🔍 Buscar Equipo...", placeholder="Ej: Buque Maria Ana, Michigan, Scania, Saveiro...", label_visibility="collapsed")
+        
+        equipos_clave = [
+            {"nombre": "Buque Maria Ana", "icono": "🚢", "tipo": "Embarcación / Buque", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Buque Malvinas", "icono": "🚢", "tipo": "Embarcación / Buque", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Cargadora Michigan", "icono": "🚜", "tipo": "Maquinaria Pesada", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Cargadora SDLG", "icono": "🚜", "tipo": "Maquinaria Pesada", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Case W20", "icono": "🚜", "tipo": "Pala / Cargadora", "estado": "En Mantenimiento", "badge": "badge-mantenimiento"},
+            {"nombre": "Autoelevador Nissan", "icono": "🏗️", "tipo": "Montacargas", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Volkswagen Saveiro", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Ford Ranger", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Fiat Strada", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Intermedia Baigorria", "icono": "⚙️", "tipo": "Bomba / Planta", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Intermedia San Lorenzo", "icono": "⚙️", "tipo": "Bomba / Planta", "estado": "Operativo", "badge": "badge-operativo"},
+            {"nombre": "Scania", "icono": "🚛", "tipo": "Propulsor / Camión", "estado": "Operativo", "badge": "badge-operativo"},
+        ]
+        
+        if search_asset and search_asset.strip():
+            equipos_filtrados = [e for e in equipos_clave if search_asset.lower() in e["nombre"].lower()]
         else:
-            st.info("No hay mantenimientos en este período.")
-            
-    with col_der:
-        st.subheader("📈 Métricas del Período (Fracttal KPIs)")
-        
-        # KPIs en grilla de 2x2
-        ck1, ck2 = st.columns(2)
-        ck1.metric("Mantenimientos Realizados", total_mants)
-        ck2.metric("Horas de Taller", f"{horas_taller:.1f} hrs")
-        
-        ck3, ck4 = st.columns(2)
-        stock_gasoil_val = stock_combustible.get('Gas-oil', 0.0)
-        ck3.metric("Stock Gas-oil", f"{stock_gasoil_val:,.0f} Lts")
-        ck4.metric("Máquinas Intervenidas", maquinas_intervenidas)
-        
-        st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
-        st.subheader("📊 Indicadores de Tipo")
-        cg1, cg2 = st.columns(2)
-        
-        import plotly.graph_objects as go
-        
-        with cg1:
-            fig_prev = go.Figure(go.Indicator(
-                mode = "gauge+number",
-                value = cant_preventivo,
-                title = {'text': "Preventivos (Meta: Alto)", 'font': {'size': 14, 'color': '#10b981'}},
-                gauge = {
-                    'axis': {'range': [0, max(50, total_mants)]},
-                    'bar': {'color': "#10b981"},
-                    'bgcolor': "#1e293b",
-                    'borderwidth': 1,
-                    'bordercolor': "#334155",
-                }
-            ))
-            fig_prev.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig_prev, use_container_width=True)
-            
-        with cg2:
-            fig_corr = go.Figure(go.Indicator(
-                mode = "gauge+number",
-                value = cant_correctivo,
-                title = {'text': "Correctivos (Meta: Bajo)", 'font': {'size': 14, 'color': '#ef4444'}},
-                gauge = {
-                    'axis': {'range': [0, max(50, total_mants)]},
-                    'bar': {'color': "#ef4444"},
-                    'bgcolor': "#1e293b",
-                    'borderwidth': 1,
-                    'bordercolor': "#334155",
-                }
-            ))
-            fig_corr.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig_corr, use_container_width=True)
+            equipos_filtrados = equipos_clave
 
-    # --- MATRIZ VISUAL DE ACTIVOS DE LA PLANTA (FRACTTAL ASSET MATRIX) ---
-    st.divider()
-    st.subheader("🚜 Matriz Visual de Activos & Equipos de Planta")
-    st.markdown("Vista rápida de la flota principal de **Areneras de la Cruz y Rozas S.A.** con accesos directos de mantenimiento y código QR.")
-    
-    # Filtro rápido de búsqueda de activo
-    search_asset = st.text_input("🔍 Buscar Equipo o Buque...", placeholder="Ej: Buque Maria Ana, Michigan, Scania, Saveiro...")
-    
-    equipos_clave = [
-        {"nombre": "Buque Maria Ana", "icono": "🚢", "tipo": "Embarcación / Buque", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Buque Malvinas", "icono": "🚢", "tipo": "Embarcación / Buque", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Cargadora Michigan", "icono": "🚜", "tipo": "Maquinaria Pesada", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Cargadora SDLG", "icono": "🚜", "tipo": "Maquinaria Pesada", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Case W20", "icono": "🚜", "tipo": "Pala / Cargadora", "estado": "En Mantenimiento", "badge": "badge-mantenimiento"},
-        {"nombre": "Autoelevador Nissan", "icono": "🏗️", "tipo": "Montacargas", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Volkswagen Saveiro", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Ford Ranger", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Fiat Strada", "icono": "🛻", "tipo": "Vehículo Liviano", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Intermedia Baigorria", "icono": "⚙️", "tipo": "Bomba / Planta", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Intermedia San Lorenzo", "icono": "⚙️", "tipo": "Bomba / Planta", "estado": "Operativo", "badge": "badge-operativo"},
-        {"nombre": "Scania", "icono": "🚛", "tipo": "Propulsor / Camión", "estado": "Operativo", "badge": "badge-operativo"},
-    ]
-    
-    if search_asset.strip():
-        equipos_filtrados = [e for e in equipos_clave if search_asset.lower() in e["nombre"].lower()]
-    else:
-        equipos_filtrados = equipos_clave
+        base_url_qr = "https://gestion-en-planta-adlc.streamlit.app"
+        cols_matrix = st.columns(4)
+        for idx, eq in enumerate(equipos_filtrados):
+            c_curr = cols_matrix[idx % 4]
+            with c_curr:
+                with st.container(border=True):
+                    st.markdown(f"**{eq['icono']} {eq['nombre']}**")
+                    st.markdown(f"<span class='{eq['badge']}'>🟢 {eq['estado']}</span>", unsafe_allow_html=True)
+                    
+                    if not df_mant.empty and "Maquina" in df_mant.columns:
+                        mants_eq = df_mant[df_mant["Maquina"] == eq["nombre"]]
+                        if not mants_eq.empty:
+                            ult_m = mants_eq.sort_values(by="Fecha", ascending=False).iloc[0]
+                            st.caption(f"Último: {formatear_fecha_visible(ult_m['Fecha'])}")
+                        else:
+                            st.caption("Sin registros recientes")
+                    
+                    url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(eq['nombre'])}"
+                    st.link_button("🔧 Ficha / Mant.", url_m, use_container_width=True)
 
-    base_url_qr = "https://gestion-en-planta-adlc.streamlit.app"
-    cols_matrix = st.columns(3)
-    for idx, eq in enumerate(equipos_filtrados):
-        c_curr = cols_matrix[idx % 3]
-        with c_curr:
-            with st.container(border=True):
-                st.markdown(f"### {eq['icono']} {eq['nombre']}")
-                st.markdown(f"<span class='{eq['badge']}'>🟢 {eq['estado']}</span>", unsafe_allow_html=True)
-                st.caption(f"Categoría: **{eq['tipo']}**")
+    # --- PESTAÑA 2: ANALÍTICA DE MANTENIMIENTO ---
+    with tab_analytics:
+        col_filtro_m, col_filtro_a = st.columns(2)
+        meses_nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+        anios_disponibles = list(range(datetime.now().year - 2, datetime.now().year + 3))
+        
+        mes_seleccionado = col_filtro_m.selectbox("Filtrar Mes", ["Todos"] + meses_nombres, index=0)
+        anio_seleccionado = col_filtro_a.selectbox("Filtrar Año", ["Todos"] + anios_disponibles, index=0)
+        
+        df_mant_fil = df_mant.copy()
+        if not df_mant_fil.empty:
+            df_mant_fil['Fecha_dt'] = pd.to_datetime(df_mant_fil['Fecha'], errors='coerce')
+            if mes_seleccionado != "Todos":
+                mes_num = meses_nombres.index(mes_seleccionado) + 1
+                df_mant_fil = df_mant_fil[df_mant_fil['Fecha_dt'].dt.month == mes_num]
+            if anio_seleccionado != "Todos":
+                df_mant_fil = df_mant_fil[df_mant_fil['Fecha_dt'].dt.year == int(anio_seleccionado)]
                 
-                # Obtener último mantenimiento de este equipo si existe
-                if not df_mant.empty and "Maquina" in df_mant.columns:
-                    mants_eq = df_mant[df_mant["Maquina"] == eq["nombre"]]
-                    if not mants_eq.empty:
-                        ult_m = mants_eq.sort_values(by="Fecha", ascending=False).iloc[0]
-                        st.caption(f"⏱️ Úlltimo Mantenimiento: **{formatear_fecha_visible(ult_m['Fecha'])}** ({ult_m['Tipo']})")
-                    else:
-                        st.caption("⏱️ Sin mantenimientos recientes registrados")
+        c_chart1, c_chart2 = st.columns([6, 4])
+        with c_chart1:
+            st.markdown("##### 🚜 Top 10 Máquinas Intervenidas")
+            if not df_mant_fil.empty:
+                df_grouped = df_mant_fil.groupby(['Maquina', 'Tipo']).size().reset_index(name='Cantidad')
+                top_machines = df_mant_fil['Maquina'].value_counts().head(10).index
+                df_top = df_grouped[df_grouped['Maquina'].isin(top_machines)]
                 
-                url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(eq['nombre'])}"
-                st.link_button("🔧 Registrar Mant. / Check-List", url_m, use_container_width=True)
+                import plotly.express as px
+                fig_bar = px.bar(
+                    df_top, 
+                    x='Maquina', 
+                    y='Cantidad', 
+                    color='Tipo',
+                    color_discrete_map={'Preventivo': '#10b981', 'Correctivo': '#ef4444'},
+                    barmode='stack',
+                    category_orders={"Maquina": list(top_machines)}
+                )
+                fig_bar.update_layout(
+                    height=280,
+                    xaxis_title=None,
+                    yaxis_title=None,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    paper_bgcolor='rgba(0,0,0,0)', 
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.info("No hay mantenimientos en este período.")
+
+        with c_chart2:
+            st.markdown("##### 📊 Relación Preventivo vs Correctivo")
+            cant_prev = len(df_mant_fil[df_mant_fil['Tipo'] == 'Preventivo']) if not df_mant_fil.empty else 0
+            cant_corr = len(df_mant_fil[df_mant_fil['Tipo'] == 'Correctivo']) if not df_mant_fil.empty else 0
             
-        st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
-        st.subheader("⛽ Stock de Hidrocarburos")
+            import plotly.graph_objects as go
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=['Preventivo', 'Correctivo'],
+                values=[cant_prev, cant_corr],
+                hole=.4,
+                marker_colors=['#10b981', '#ef4444']
+            )])
+            fig_pie.update_layout(height=280, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    # --- PESTAÑA 3: RESUMEN ÚNICO DE HIDROCARBUROS ---
+    with tab_hidro_summary:
+        st.markdown("##### ⛽ Stock Remanente de Hidrocarburos & Lubricantes")
         if not df_hidro.empty:
             hidro_productos = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
-            
-            # En columnas de 2x2 para hidrocarburos
-            ch_col1, ch_col2 = st.columns(2)
+            cols_h = st.columns(4)
             for idx, prod in enumerate(hidro_productos):
                 stock_val = stock_combustible.get(prod, 0.0)
                 unidad = "Lts" if prod != "Grasa de Litio" else "Kg"
                 
-                # Definir alertas de stock
-                if prod == "Gas-oil":
-                    alerta_critica = 1500
-                    alerta_moderada = 3000
-                else:
-                    alerta_critica = 50
-                    alerta_moderada = 100
-                    
-                status_text = "Estable"
-                status_color = "normal"
+                alerta_critica = 1500 if prod == "Gas-oil" else 50
+                alerta_moderada = 3000 if prod == "Gas-oil" else 100
                 
+                status_text = "🟢 Normal"
                 if stock_val < alerta_critica:
-                    status_text = "⚠️ Stock Crítico"
-                    status_color = "inverse"
+                    status_text = "🔴 Stock Crítico"
                 elif stock_val < alerta_moderada:
-                    status_text = "⚠️ Stock Bajo"
-                    status_color = "off"
+                    status_text = "🟡 Stock Bajo"
                     
-                target_col = ch_col1 if idx % 2 == 0 else ch_col2
-                with target_col:
-                    st.metric(
-                        label=f"{prod} ({unidad})",
-                        value=f"{stock_val:,.1f}",
-                        delta=status_text,
-                        delta_color=status_color
-                    )
+                with cols_h[idx % 4]:
+                    with st.container(border=True):
+                        st.markdown(f"**{prod}**")
+                        st.markdown(f"### {stock_val:,.1f} {unidad}")
+                        st.caption(status_text)
         else:
-            st.info("No hay movimientos de hidrocarburos registrados.")
+            st.info("No hay registros de movimientos de hidrocarburos.")
 
 
 # --- 2. MANTENIMIENTO REALIZADO ---
