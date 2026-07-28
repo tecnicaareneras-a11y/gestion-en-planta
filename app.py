@@ -546,6 +546,18 @@ def init_db():
     if "CreadoPor" not in columnas_cd:
         cursor.execute("ALTER TABLE controles_diarios ADD COLUMN CreadoPor TEXT")
         
+    # Asegurar que existan las nuevas columnas en planificacion si ya existe la tabla
+    cursor.execute("PRAGMA table_info(planificacion)")
+    columnas_p = [row[1] for row in cursor.fetchall()]
+    if "Tipo" not in columnas_p:
+        cursor.execute("ALTER TABLE planificacion ADD COLUMN Tipo TEXT DEFAULT 'Preventivo Programado'")
+    if "Prioridad" not in columnas_p:
+        cursor.execute("ALTER TABLE planificacion ADD COLUMN Prioridad TEXT DEFAULT 'Media'")
+    if "Detalle" not in columnas_p:
+        cursor.execute("ALTER TABLE planificacion ADD COLUMN Detalle TEXT DEFAULT ''")
+    if "Horimetro_Est" not in columnas_p:
+        cursor.execute("ALTER TABLE planificacion ADD COLUMN Horimetro_Est REAL DEFAULT 0.0")
+        
     # Inicializar registros antiguos con valores por defecto
     cursor.execute("UPDATE mantenimientos SET FechaCreacion = Fecha || ' 00:00:00' WHERE FechaCreacion IS NULL")
     cursor.execute("UPDATE mantenimientos SET HistorialModificaciones = 'Importado desde Excel.' WHERE HistorialModificaciones IS NULL")
@@ -2073,57 +2085,194 @@ elif menu == "📋 Reporte Mant. Realizado":
                 hide_index=True
             )
 
-# --- 4. PROGRAMACIÓN & PLAN DE MANTENIMIENTO (PCM) ---
+# --- 4. PROGRAMACIÓN & PLAN DE MANTENIMIENTO (PCM - FRACTTAL STYLE) ---
 elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
-    st.header("📅 Plan de Mantenimientos Preventivos (PCM)")
+    st.markdown("""
+    <div class="fracttal-header">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div>
+                <h3 class="fracttal-title">📅 PROGRAMACIÓN & PLAN DE MANTENIMIENTO (PCM)</h3>
+                <div class="fracttal-subtitle">Gestión de Órdenes de Trabajo Programadas — Preventivos & Correctivos Planificados</div>
+            </div>
+            <div style="text-align:right;">
+                <span class="badge-operativo">⚙️ Módulo PCM Activo</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     df_p = cargar_datos_db("planificacion")
     
-    col_p1, col_p2 = st.columns([1, 2])
-    with col_p1:
-        st.subheader("Programar Tarea")
-        with st.form("f_plan"):
-            m_p = st.selectbox("Máquina", maquinas_list)
-            tarea = st.text_input("Tarea (ej: Cambio de aceite)")
-            f_p = st.date_input("Fecha Prevista", format="DD/MM/YYYY")
-            if st.form_submit_button("Programar"):
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                INSERT INTO planificacion (Maquina, Tarea, Fecha_Prog, Estado, Fecha_Fin, Tecnico)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, (m_p, tarea, f_p.strftime("%Y-%m-%d"), "Pendiente", "", ""))
-                conn.commit()
-                conn.close()
-                st.rerun()
-    
-    with col_p2:
-        st.subheader("Tareas Pendientes")
-        if not df_p.empty:
-            df_pendientes = df_p[df_p["Estado"] == "Pendiente"]
-        else:
-            df_pendientes = pd.DataFrame()
+    # Asegurar columnas si faltan en dataframe
+    for col_req in ["Tipo", "Prioridad", "Detalle", "Horimetro_Est"]:
+        if not df_p.empty and col_req not in df_p.columns:
+            df_p[col_req] = ""
             
+    # Calcular KPIs del Plan
+    total_ots = len(df_p) if not df_p.empty else 0
+    df_pendientes = df_p[df_p["Estado"].isin(["Pendiente", "En Ejecución"])] if not df_p.empty and "Estado" in df_p.columns else pd.DataFrame()
+    total_pend = len(df_pendientes)
+    total_criticas = len(df_pendientes[df_pendientes["Prioridad"].str.contains("Alta", case=False, na=False)]) if not df_pendientes.empty and "Prioridad" in df_pendientes.columns else 0
+    total_prev = len(df_pendientes[df_pendientes["Tipo"].str.contains("Preventivo", case=False, na=False)]) if not df_pendientes.empty and "Tipo" in df_pendientes.columns else 0
+    total_corr = len(df_pendientes[df_pendientes["Tipo"].str.contains("Correctivo", case=False, na=False)]) if not df_pendientes.empty and "Tipo" in df_pendientes.columns else 0
+    
+    # 1. FILA DE METRICAS DEL PLAN (KPIS COMPACTOS)
+    col_pk1, col_pk2, col_pk3, col_pk4 = st.columns(4)
+    col_pk1.metric("OTs Pendientes / En Curso", total_pend)
+    col_pk2.metric("Prioridad Alta / Crítica 🚨", total_criticas)
+    col_pk3.metric("Preventivos Planificados 🛠️", total_prev)
+    col_pk4.metric("Correctivos Programados 🔧", total_corr)
+
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+
+    # 2. PESTAÑAS ORGANIZADAS
+    tab_ots_activas, tab_nueva_ot, tab_historial_pcm = st.tabs([
+        "📋 Programa Activo de Órdenes de Trabajo (OT)",
+        "➕ Planificar Nueva Orden de Trabajo (OT)",
+        "📜 Historial & Cumplimiento del Plan"
+    ])
+
+    # --- PESTAÑA 1: PROGRAMA ACTIVO (TABLERO KANBAN / LISTA DE OTS) ---
+    with tab_ots_activas:
         if not df_pendientes.empty:
-            for idx, row in df_pendientes.iterrows():
-                db_id = row['id']
-                with st.expander(f"{formatear_fecha_visible(row['Fecha_Prog'])} - {row['Maquina']}"):
-                    st.write(f"Tarea: {row['Tarea']}")
-                    op_realizo = st.selectbox("Quién realizó", empleados_list, key=f"op_{db_id}")
-                    if st.button("Marcar como Realizado", key=f"btn_{db_id}"):
-                        conn = get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                        UPDATE planificacion SET
-                            Estado = "Realizado",
-                            Fecha_Fin = ?,
-                            Tecnico = ?
-                        WHERE id = ?
-                        """, (datetime.now().strftime("%Y-%m-%d"), op_realizo, db_id))
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
+            c_f1, c_f2, c_f3 = st.columns(3)
+            filtro_tipo = c_f1.selectbox("Filtrar Tipo OT", ["Todos", "Preventivo Programado", "Correctivo Programado", "Inspección Periódica"], key="f_pcm_tipo")
+            filtro_prio = c_f2.selectbox("Filtrar Prioridad", ["Todas", "🔴 Alta / Crítica", "🟡 Media / Rutina", "🟢 Baja / Mejora"], key="f_pcm_prio")
+            filtro_maq = c_f3.selectbox("Filtrar Equipo", ["Todos"] + list(df_pendientes["Maquina"].unique()), key="f_pcm_maq")
+            
+            df_display = df_pendientes.copy()
+            if filtro_tipo != "Todos":
+                df_display = df_display[df_display["Tipo"] == filtro_tipo]
+            if filtro_prio != "Todas":
+                df_display = df_display[df_display["Prioridad"] == filtro_prio]
+            if filtro_maq != "Todos":
+                df_display = df_display[df_display["Maquina"] == filtro_maq]
+
+            st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+            
+            if df_display.empty:
+                st.info("No hay Órdenes de Trabajo que coincidan con los filtros seleccionados.")
+            else:
+                for idx, row in df_display.iterrows():
+                    db_id = row['id']
+                    prio_val = str(row['Prioridad']) if pd.notna(row['Prioridad']) and str(row['Prioridad']).strip() else "🟡 Media / Rutina"
+                    tipo_val = str(row['Tipo']) if pd.notna(row['Tipo']) and str(row['Tipo']).strip() else "Preventivo Programado"
+                    estado_val = str(row['Estado']) if pd.notna(row['Estado']) else "Pendiente"
+                    
+                    badge_prio = "badge-revision" if "Alta" in prio_val else ("badge-mantenimiento" if "Media" in prio_val else "badge-operativo")
+                    badge_est = "badge-mantenimiento" if estado_val == "En Ejecución" else "badge-operativo"
+                    
+                    with st.container(border=True):
+                        c_t1, c_t2 = st.columns([3, 1])
+                        with c_t1:
+                            st.markdown(f"### 🚜 **{row['Maquina']}** — {row['Tarea']}")
+                            st.markdown(f"<span class='{badge_prio}'>{prio_val}</span> &nbsp; <span class='badge-operativo'>🛠️ {tipo_val}</span> &nbsp; <span class='{badge_est}'>📌 Estado: {estado_val}</span>", unsafe_allow_html=True)
+                            st.caption(f"📅 Fecha Prevista: **{formatear_fecha_visible(row['Fecha_Prog'])}** | 👤 Asignado: **{row['Tecnico'] if row['Tecnico'] else 'Sin asignar'}** | ⏱️ Horímetro Objetivo: **{row['Horimetro_Est'] if pd.notna(row['Horimetro_Est']) and float(row['Horimetro_Est']) > 0 else 'N/A'}**")
+                            if pd.notna(row['Detalle']) and str(row['Detalle']).strip():
+                                st.write(f"📝 **Detalle & Repuestos:** {row['Detalle']}")
+                        
+                        with c_t2:
+                            st.markdown("**Acciones de Gestión:**")
+                            if estado_val == "Pendiente":
+                                if st.button("▶️ Iniciar OT", key=f"init_ot_{db_id}", use_container_width=True):
+                                    conn = get_connection()
+                                    cursor = conn.cursor()
+                                    cursor.execute("UPDATE planificacion SET Estado = 'En Ejecución' WHERE id = ?", (db_id,))
+                                    conn.commit()
+                                    conn.close()
+                                    st.rerun()
+                            
+                            with st.popover("✅ Marcar Realizado"):
+                                tech_realizo = st.selectbox("Técnico que ejecutó", empleados_list, key=f"tech_exec_{db_id}")
+                                obs_ejec = st.text_input("Observación final", placeholder="Ej: Se completó según especificación", key=f"obs_exec_{db_id}")
+                                if st.button("💾 Confirmar Cierre OT", key=f"confirm_close_{db_id}"):
+                                    conn = get_connection()
+                                    cursor = conn.cursor()
+                                    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+                                    cursor.execute("""
+                                    UPDATE planificacion SET
+                                        Estado = 'Realizado',
+                                        Fecha_Fin = ?,
+                                        Tecnico = ?
+                                    WHERE id = ?
+                                    """, (fecha_hoy, tech_realizo, db_id))
+                                    
+                                    det_auto = f"[PCM] {row['Tarea']}"
+                                    if obs_ejec.strip():
+                                        det_auto += f". Obs: {obs_ejec.strip()}"
+                                    fecha_c = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    cursor.execute("""
+                                    INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (fecha_hoy, row['Maquina'], tech_realizo, "Preventivo" if "Preventivo" in tipo_val else "Correctivo", "08:00", "1.0 hs", float(row['Horimetro_Est']) if pd.notna(row['Horimetro_Est']) else 0.0, det_auto, "Depósito Baigorria", fecha_c, "Ejecutado desde Planificación PCM.", st.session_state.get("usuario")))
+                                    conn.commit()
+                                    conn.close()
+                                    st.success("¡OT completada y registrada en el historial!")
+                                    st.rerun()
+                                    
+                            if st.button("❌ Cancelar OT", key=f"cancel_ot_{db_id}", use_container_width=True):
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute("UPDATE planificacion SET Estado = 'Cancelado' WHERE id = ?", (db_id,))
+                                conn.commit()
+                                conn.close()
+                                st.rerun()
         else:
-            st.info("No hay tareas pendientes.")
+            st.info("🟢 No hay Órdenes de Trabajo pendientes en el programa de mantenimiento.")
+
+    # --- PESTAÑA 2: PLANIFICAR NUEVA ORDEN DE TRABAJO (OT) ---
+    with tab_nueva_ot:
+        st.markdown("##### ➕ Formulario de Planificación Técnica (PCM)")
+        with st.form("form_nueva_ot_pcm"):
+            c_p1, c_p2 = st.columns(2)
+            maq_ot = c_p1.selectbox("Máquina / Activo Destino", maquinas_list, placeholder="Escriba para buscar equipo...")
+            tipo_ot = c_p2.selectbox("Tipo de Intervención", ["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"])
+            
+            c_p3, c_p4 = st.columns(2)
+            prio_ot = c_p3.selectbox("Prioridad de Atención", ["🟡 Media / Rutina", "🔴 Alta / Crítica", "🟢 Baja / Mejora"])
+            fecha_prog_ot = c_p4.date_input("Fecha Prevista de Ejecución", datetime.now(), format="DD/MM/YYYY")
+            
+            c_p5, c_p6 = st.columns(2)
+            tech_asig_ot = c_p5.selectbox("Técnico Responsable Asignado", empleados_list, index=0 if empleados_list else None)
+            horim_est_ot = c_p6.number_input("Horímetro Objetivo Estimado (opcional)", min_value=0.0, step=0.1, format="%.1f")
+            
+            tarea_ot = st.text_input("Título de la Tarea / OT", placeholder="Ej: Cambio de aceite de motor y filtros 500 hrs")
+            detalle_ot = st.text_area("Descripción detallada del Trabajo & Repuestos Previstos", placeholder="Ej: Traer 20L de aceite Shell Rimula 15W40, filtro de aceite W950 y filtro de combustible...")
+            
+            btn_guardar_ot = st.form_submit_button("📅 Programar Orden de Trabajo")
+            
+            if btn_guardar_ot:
+                if not maq_ot:
+                    st.error("⚠️ Por favor selecciona la máquina o activo destino.")
+                elif not tarea_ot.strip():
+                    st.error("⚠️ Por favor escribe el título de la tarea u orden de trabajo.")
+                else:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                    INSERT INTO planificacion (Maquina, Tarea, Fecha_Prog, Estado, Fecha_Fin, Tecnico, Tipo, Prioridad, Detalle, Horimetro_Est)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (maq_ot, tarea_ot.strip(), fecha_prog_ot.strftime("%Y-%m-%d"), "Pendiente", "", tech_asig_ot, tipo_ot, prio_ot, detalle_ot.strip(), horim_est_ot))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"🎉 Orden de Trabajo programada con éxito para {maq_ot}.")
+                    st.rerun()
+
+    # --- PESTAÑA 3: HISTORIAL DE CUMPLIMIENTO ---
+    with tab_historial_pcm:
+        st.markdown("##### 📜 Historial de Órdenes de Trabajo Ejecutadas & Canceladas")
+        if not df_p.empty:
+            df_hist_pcm = df_p[df_p["Estado"].isin(["Realizado", "Cancelado"])]
+            if not df_hist_pcm.empty:
+                st.dataframe(
+                    df_hist_pcm[["Fecha_Prog", "Fecha_Fin", "Maquina", "Tarea", "Tipo", "Prioridad", "Estado", "Tecnico"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("No hay registros en el historial de planificaciones completadas.")
+        else:
+            st.info("No hay registros de planificación.")
 
 # --- 5. GESTIÓN DE REPUESTOS E INSUMOS ---
 elif menu == "📦 Gestión de Repuestos e Insumos":
