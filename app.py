@@ -1049,6 +1049,7 @@ def mostrar_registro_rapido_qr(maquina_qr):
             t1 = col1.checkbox("Revisión General")
             t2 = col1.checkbox("Lubricación / Engrase")
             t3 = col1.checkbox("Cambio de Aceite")
+            t7 = col1.checkbox("Reparación Mecánica")
             t4 = col2.checkbox("Limpieza de Filtros")
             t5 = col2.checkbox("Ajuste de Correas / Pernos")
             t6 = col2.checkbox("Reparación Eléctrica")
@@ -1066,6 +1067,7 @@ def mostrar_registro_rapido_qr(maquina_qr):
                     if t1: tareas.append("Revisión General")
                     if t2: tareas.append("Lubricación/Engrase")
                     if t3: tareas.append("Cambio de Aceite")
+                    if t7: tareas.append("Reparación Mecánica")
                     if t4: tareas.append("Limpieza de Filtros")
                     if t5: tareas.append("Ajuste de Correas/Pernos")
                     if t6: tareas.append("Reparación Eléctrica")
@@ -1540,7 +1542,18 @@ elif menu == "🔧 Mant. Realizado":
                 h_i = c2.time_input("Hora Inicio")
                 h_f = c2.time_input("Hora Fin")
                 horimetro = st.number_input("Horímetro", min_value=0.0, step=0.1, format="%.1f")
-                repuestos = st.text_area("Detalle de la tarea y Repuestos usados")
+                
+                st.markdown("##### 🔧 Tareas Realizadas (Selecciona con clics):")
+                col1, col2 = st.columns(2)
+                t1 = col1.checkbox("Revisión General", key="fm_t1")
+                t2 = col1.checkbox("Lubricación / Engrase", key="fm_t2")
+                t3 = col1.checkbox("Cambio de Aceite", key="fm_t3")
+                t7 = col1.checkbox("Reparación Mecánica", key="fm_t7")
+                t4 = col2.checkbox("Limpieza de Filtros", key="fm_t4")
+                t5 = col2.checkbox("Ajuste de Correas / Pernos", key="fm_t5")
+                t6 = col2.checkbox("Reparación Eléctrica", key="fm_t6")
+                
+                repuestos = st.text_area("Observación / Repuestos usados (opcional)", placeholder="Ej: Se cambiaron retenes, juntas o repuestos...")
                 
                 if st.form_submit_button("Guardar Registro"):
                     if not maquina:
@@ -1548,13 +1561,31 @@ elif menu == "🔧 Mant. Realizado":
                     elif not operario:
                         st.error("⚠️ Por favor selecciona el técnico responsable.")
                     else:
+                        tareas = []
+                        if t1: tareas.append("Revisión General")
+                        if t2: tareas.append("Lubricación/Engrase")
+                        if t3: tareas.append("Cambio de Aceite")
+                        if t7: tareas.append("Reparación Mecánica")
+                        if t4: tareas.append("Limpieza de Filtros")
+                        if t5: tareas.append("Ajuste de Correas/Pernos")
+                        if t6: tareas.append("Reparación Eléctrica")
+                        
+                        detalle_final = ", ".join(tareas)
+                        if repuestos and repuestos.strip():
+                            if detalle_final:
+                                detalle_final += f". Obs: {repuestos.strip()}"
+                            else:
+                                detalle_final = repuestos.strip()
+                        if not detalle_final:
+                            detalle_final = "Mantenimiento realizado."
+
                         conn = get_connection()
                         cursor = conn.cursor()
                         fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         cursor.execute("""
                         INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (fecha.strftime("%Y-%m-%d"), maquina, operario, tipo, str(h_i), str(h_f), horimetro, repuestos, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("usuario")))
+                        """, (fecha.strftime("%Y-%m-%d"), maquina, operario, tipo, str(h_i), str(h_f), horimetro, detalle_final, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("usuario")))
                         conn.commit()
                         conn.close()
                         st.success("¡Mantenimiento guardado!")
