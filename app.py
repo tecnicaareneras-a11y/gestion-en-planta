@@ -2182,6 +2182,30 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                     conn.close()
                                     st.rerun()
                             
+                            with st.popover("✏️ Editar OT"):
+                                with st.form(key=f"edit_ot_form_{db_id}"):
+                                    st.markdown("##### ✏️ Modificar Orden de Trabajo")
+                                    ed_maq = st.selectbox("Máquina", maquinas_list, index=maquinas_list.index(row['Maquina']) if row['Maquina'] in maquinas_list else 0)
+                                    ed_tarea = st.text_input("Título / Tarea", value=str(row['Tarea']))
+                                    ed_tipo = st.selectbox("Tipo", ["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"], index=["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"].index(tipo_val) if tipo_val in ["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"] else 0)
+                                    ed_prio = st.selectbox("Prioridad", ["🔴 Alta / Crítica", "🟡 Media / Rutina", "🟢 Baja / Mejora"], index=["🔴 Alta / Crítica", "🟡 Media / Rutina", "🟢 Baja / Mejora"].index(prio_val) if prio_val in ["🔴 Alta / Crítica", "🟡 Media / Rutina", "🟢 Baja / Mejora"] else 1)
+                                    ed_fecha = st.date_input("Fecha Prevista", value=pd.to_datetime(row['Fecha_Prog']).date() if pd.notna(row['Fecha_Prog']) else datetime.now().date(), format="DD/MM/YYYY")
+                                    ed_tech = st.selectbox("Técnico Asignado", empleados_list, index=empleados_list.index(row['Tecnico']) if row['Tecnico'] in empleados_list else 0)
+                                    ed_det = st.text_area("Detalle & Repuestos", value=str(row['Detalle']) if pd.notna(row['Detalle']) else "")
+                                    
+                                    if st.form_submit_button("💾 Guardar Cambios"):
+                                        conn = get_connection()
+                                        cursor = conn.cursor()
+                                        cursor.execute("""
+                                        UPDATE planificacion SET
+                                            Maquina = ?, Tarea = ?, Tipo = ?, Prioridad = ?, Fecha_Prog = ?, Tecnico = ?, Detalle = ?
+                                        WHERE id = ?
+                                        """, (ed_maq, ed_tarea.strip(), ed_tipo, ed_prio, ed_fecha.strftime("%Y-%m-%d"), ed_tech, ed_det.strip(), db_id))
+                                        conn.commit()
+                                        conn.close()
+                                        st.success("¡Orden de Trabajo modificada con éxito!")
+                                        st.rerun()
+
                             with st.popover("✅ Marcar Realizado"):
                                 tech_realizo = st.selectbox("Técnico que ejecutó", empleados_list, key=f"tech_exec_{db_id}")
                                 obs_ejec = st.text_input("Observación final", placeholder="Ej: Se completó según especificación", key=f"obs_exec_{db_id}")
