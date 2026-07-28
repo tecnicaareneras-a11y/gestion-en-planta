@@ -2278,6 +2278,7 @@ elif menu == "📋 Reporte Movimientos Stock":
         
         # Mostrar Resumen de Stock
         st.subheader("📦 Resumen de Stock Remanente")
+        stock_actual = stock_actual.fillna("")
         st.dataframe(stock_actual, use_container_width=True, hide_index=True)
         
         st.divider()
@@ -2418,8 +2419,20 @@ elif menu == "📋 Reporte Movimientos Stock":
                             st.success("¡Registro de stock eliminado con éxito!")
                             st.rerun()
         else:
+            # Sanitizar strings para que jamás se genere un badge nulo en Streamlit
+            df_mostrar_sorted["Producto"] = df_mostrar_sorted["Producto"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+            df_mostrar_sorted["Movimiento"] = df_mostrar_sorted["Movimiento"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+            df_mostrar_sorted["Destino"] = df_mostrar_sorted["Destino"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+
             st.dataframe(
                 df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino"]],
+                column_config={
+                    "Fecha": st.column_config.TextColumn("Fecha"),
+                    "Producto": st.column_config.TextColumn("Producto"),
+                    "Movimiento": st.column_config.TextColumn("Movimiento"),
+                    "Cantidad": st.column_config.NumberColumn("Cantidad", format="%.1f"),
+                    "Destino": st.column_config.TextColumn("Destino / Ubicación"),
+                },
                 use_container_width=True,
                 hide_index=True
             )
@@ -2472,7 +2485,8 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
 
         # Mostrar Resumen de Stock
         st.subheader("📦 Resumen de Stock Remanente")
-        st.dataframe(stock_actual, use_container_width=True)
+        stock_actual = stock_actual.fillna("")
+        st.dataframe(stock_actual, use_container_width=True, hide_index=True)
 
         st.divider()
 
@@ -2620,8 +2634,22 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                             st.success("¡Registro de hidrocarburos eliminado con éxito!")
                             st.rerun()
         else:
+            # Sanitizar strings para que jamás se genere un badge nulo en Streamlit
+            df_mostrar_sorted["Producto"] = df_mostrar_sorted["Producto"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+            df_mostrar_sorted["Movimiento"] = df_mostrar_sorted["Movimiento"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+            df_mostrar_sorted["Destino"] = df_mostrar_sorted["Destino"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+            df_mostrar_sorted["Operario"] = df_mostrar_sorted["Operario"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+
             st.dataframe(
                 df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]],
+                column_config={
+                    "Fecha": st.column_config.TextColumn("Fecha"),
+                    "Producto": st.column_config.TextColumn("Producto"),
+                    "Movimiento": st.column_config.TextColumn("Movimiento"),
+                    "Cantidad": st.column_config.NumberColumn("Cantidad (Lts)", format="%.1f Lts"),
+                    "Destino": st.column_config.TextColumn("Destino"),
+                    "Operario": st.column_config.TextColumn("Responsable"),
+                },
                 use_container_width=True,
                 hide_index=True
             )
