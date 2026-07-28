@@ -1042,7 +1042,11 @@ def mostrar_registro_rapido_qr(maquina_qr):
             operario = st.selectbox("Técnico Responsable", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar técnico...")
             tipo = st.selectbox("Tipo de Mantenimiento", ["Correctivo", "Preventivo"])
             
-            duracion_horas = st.slider("Duración del trabajo (Horas)", min_value=0.5, max_value=8.0, value=1.0, step=0.5)
+            cf1, cf2 = st.columns(2)
+            fecha_inicio = cf1.date_input("Fecha Inicio", datetime.now(), format="DD/MM/YYYY")
+            fecha_fin = cf2.date_input("Fecha Finalización", value=fecha_inicio, format="DD/MM/YYYY")
+            
+            duracion_horas = st.number_input("⏱️ Duración total del trabajo (en Horas)", min_value=0.1, max_value=2000.0, value=1.0, step=0.5, format="%.1f")
             
             st.markdown("##### 🔧 Tareas Realizadas (Selecciona con clics):")
             col1, col2 = st.columns(2)
@@ -1081,20 +1085,23 @@ def mostrar_registro_rapido_qr(maquina_qr):
                     if not detalle_final:
                         detalle_final = "Mantenimiento preventivo por código QR."
                         
-                    hora_fin_dt = datetime.now()
-                    hora_ini_dt = hora_fin_dt - pd.Timedelta(hours=duracion_horas)
-                    inicio = hora_ini_dt.strftime("%H:%M")
-                    fin = hora_fin_dt.strftime("%H:%M")
+                    hora_ini_str = "08:00"
+                    if fecha_fin > fecha_inicio:
+                        dias_diff = (fecha_fin - fecha_inicio).days
+                        hora_fin_str = f"{fecha_fin.strftime('%d/%m/%Y')} ({duracion_horas:.1f} hs)"
+                        detalle_final += f" [Trabajo multipropósito de {dias_diff + 1} días]"
+                    else:
+                        hora_fin_str = f"{duracion_horas:.1f} hs"
                     
                     fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    fecha_actividad = datetime.now().strftime("%Y-%m-%d")
+                    fecha_actividad = fecha_inicio.strftime("%Y-%m-%d")
                     
                     conn = get_connection()
                     cursor = conn.cursor()
                     cursor.execute("""
                     INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (fecha_actividad, maquina_qr, operario, tipo, inicio, fin, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("usuario")))
+                    """, (fecha_actividad, maquina_qr, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("usuario")))
                     conn.commit()
                     conn.close()
                     
@@ -1335,12 +1342,38 @@ if menu == "🏠 Inicio - Tablero General":
             return 0.0
         def diff_horas(row):
             try:
-                h_i, m_i = map(int, str(row['Inicio']).split(':'))
-                h_f, m_f = map(int, str(row['Fin']).split(':'))
+                str_i = str(row['Inicio']).strip()
+                str_f = str(row['Fin']).strip()
+                
+                # Caso 1: Si incluye "hs" (ej: "48.0 hs" o "120.0 hs")
+                if "hs" in str_f.lower():
+                    clean_f = str_f.lower().split("hs")[0].split("(")[-1].replace(")", "").strip()
+                    return float(clean_f)
+                if "hs" in str_i.lower():
+                    clean_i = str_i.lower().split("hs")[0].split("(")[-1].replace(")", "").strip()
+                    return float(clean_i)
+                    
+                # Caso 2: Números directos (ej: Inicio="0.0", Fin="24.0")
+                if ":" not in str_i and ":" not in str_f:
+                    try:
+                        val_f = float(str_f)
+                        val_i = float(str_i)
+                        return max(0.0, val_f - val_i) if val_f >= val_i else val_f
+                    except:
+                        pass
+                        
+                # Caso 3: Formato horario HH:MM
+                h_i, m_i = map(int, str_i.split(':'))
+                h_f, m_f = map(int, str_f.split(':'))
                 diff = (h_f * 60 + m_f) - (h_i * 60 + m_i)
+                if diff < 0:
+                    diff += 24 * 60
                 return max(0.0, diff / 60.0)
             except:
-                return 0.0
+                try:
+                    return float(row['Fin'])
+                except:
+                    return 0.0
         return df.apply(diff_horas, axis=1).sum()
         
     horas_taller_glob = calcular_horas_totales(df_mant)
@@ -1531,17 +1564,18 @@ elif menu == "🔧 Mant. Realizado":
         if tipo_registro == "🔧 Registrar Mantenimiento Realizado":
             with st.form("form_mant"):
                 c1, c2 = st.columns(2)
-                fecha = c1.date_input("Fecha", datetime.now(), format="DD/MM/YYYY")
-                # Intentar pre-seleccionar el usuario logueado si coincide con algún empleado en base de datos (con búsqueda tolerante a acentos/casing)
+                fecha_inicio = c1.date_input("Fecha Inicio", datetime.now(), format="DD/MM/YYYY")
+                fecha_fin = c2.date_input("Fecha Finalización", value=fecha_inicio, format="DD/MM/YYYY")
+                
                 usuario_logueado = st.session_state.get("usuario", "")
                 indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
                     
                 maquina = c1.selectbox("Máquina Intervenida", maquinas_list, index=None, placeholder="Escribe para buscar máquina...")
                 operario = c1.selectbox("Técnico Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar técnico...")
                 tipo = c2.selectbox("Tipo de Mantenimiento", ["Correctivo", "Preventivo"])
-                h_i = c2.time_input("Hora Inicio")
-                h_f = c2.time_input("Hora Fin")
-                horimetro = st.number_input("Horímetro", min_value=0.0, step=0.1, format="%.1f")
+                
+                duracion_horas = c2.number_input("⏱️ Duración del Trabajo (en Horas)", min_value=0.1, max_value=2000.0, value=1.0, step=0.5, format="%.1f")
+                horimetro = st.number_input("Horímetro actual de la máquina (opcional)", min_value=0.0, step=0.1, format="%.1f")
                 
                 st.markdown("##### 🔧 Tareas Realizadas (Selecciona con clics):")
                 col1, col2 = st.columns(2)
@@ -1579,13 +1613,21 @@ elif menu == "🔧 Mant. Realizado":
                         if not detalle_final:
                             detalle_final = "Mantenimiento realizado."
 
+                        hora_ini_str = "08:00"
+                        if fecha_fin > fecha_inicio:
+                            dias_diff = (fecha_fin - fecha_inicio).days
+                            hora_fin_str = f"{fecha_fin.strftime('%d/%m/%Y')} ({duracion_horas:.1f} hs)"
+                            detalle_final += f" [Intervención de {dias_diff + 1} días]"
+                        else:
+                            hora_fin_str = f"{duracion_horas:.1f} hs"
+
                         conn = get_connection()
                         cursor = conn.cursor()
                         fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         cursor.execute("""
                         INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (fecha.strftime("%Y-%m-%d"), maquina, operario, tipo, str(h_i), str(h_f), horimetro, detalle_final, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("usuario")))
+                        """, (fecha_inicio.strftime("%Y-%m-%d"), maquina, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("usuario")))
                         conn.commit()
                         conn.close()
                         st.success("¡Mantenimiento guardado!")
