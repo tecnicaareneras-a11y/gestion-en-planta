@@ -2476,6 +2476,7 @@ elif menu == "📋 Reporte Movimientos Stock":
         # Formatear y mostrar la tabla ordenada
         df_mostrar_sorted = df_mostrar.sort_values(by="Fecha", ascending=False).copy()
         df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
+        df_mostrar_sorted = df_mostrar_sorted.fillna("")
         st.dataframe(
             df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino"]],
             use_container_width=True,
@@ -2670,7 +2671,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
         # Formatear y mostrar la tabla ordenada
         df_mostrar_sorted = df_mostrar.sort_values(by="Fecha", ascending=False).copy()
         df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
-
+        df_mostrar_sorted = df_mostrar_sorted.fillna("")
         st.dataframe(
             df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]],
             use_container_width=True,
