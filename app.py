@@ -1272,22 +1272,22 @@ st.sidebar.title("🛠️ GESTIÓN TÉCNICA")
 user_role = st.session_state.get("rol", "Operario")
 if user_role == "Operario":
     opciones_menu = [
-        "🔧 Mant. Realizado",
-        "⛽ Control Hidrocarburos",
-        "📦 Control de Stock"
+        "🔧 Registro de Intervenciones (OT)",
+        "⛽ Gestión de Combustibles & Lubricantes",
+        "📦 Gestión de Repuestos e Insumos"
     ]
 else:
     opciones_menu = [
         "🏠 Inicio - Tablero General",
-        "🔧 Mant. Realizado",
+        "🔧 Registro de Intervenciones (OT)",
         "📋 Reporte Mant. Realizado",
-        "📦 Control de Stock",
+        "📦 Gestión de Repuestos e Insumos",
         "📋 Reporte Movimientos Stock",
-        "⛽ Control Hidrocarburos",
-        "📋 Reporte Movimientos Hidro",
-        "📅 Planificación",
-        "⚙️ Configuración",
-        "📥 Exportar Excel"
+        "⛽ Gestión de Combustibles & Lubricantes",
+        "📋 Balances & Reportes de Hidrocarburos",
+        "📅 Programación & Plan de Mantenimiento (PCM)",
+        "⚙️ Datos Maestros & Gestión QR",
+        "📥 Exportación Global de Datos"
     ]
 
 menu = st.sidebar.radio("Menú:", opciones_menu)
@@ -1541,8 +1541,8 @@ if menu == "🏠 Inicio - Tablero General":
             st.info("No hay registros de movimientos de hidrocarburos.")
 
 
-# --- 2. MANTENIMIENTO REALIZADO ---
-elif menu == "🔧 Mant. Realizado":
+# --- 2. MANTENIMIENTO REALIZADO (REGISTRO DE INTERVENCIONES OT) ---
+elif menu == "🔧 Registro de Intervenciones (OT)":
     st.header("📝 Registro de Intervención")
     
     tipo_registro = st.radio(
@@ -2073,9 +2073,9 @@ elif menu == "📋 Reporte Mant. Realizado":
                 hide_index=True
             )
 
-# --- 4. PLANIFICACIÓN ---
-elif menu == "📅 Planificación":
-    st.header("📅 Plan de Mantenimientos Preventivos")
+# --- 4. PROGRAMACIÓN & PLAN DE MANTENIMIENTO (PCM) ---
+elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
+    st.header("📅 Plan de Mantenimientos Preventivos (PCM)")
     df_p = cargar_datos_db("planificacion")
     
     col_p1, col_p2 = st.columns([1, 2])
@@ -2125,8 +2125,8 @@ elif menu == "📅 Planificación":
         else:
             st.info("No hay tareas pendientes.")
 
-# --- 5. CONTROL DE STOCK (Corregido nombre del menú) ---
-elif menu == "📦 Control de Stock":
+# --- 5. GESTIÓN DE REPUESTOS E INSUMOS ---
+elif menu == "📦 Gestión de Repuestos e Insumos":
     st.header("📦 Movimientos de Stock")
     with st.form("f_stock"):
         c1, c2 = st.columns(2)
@@ -2273,9 +2273,9 @@ elif menu == "📋 Reporte Movimientos Stock":
                         st.success("¡Registro de stock eliminado con éxito!")
                         st.rerun()
 
-# --- 6. CONTROL HIDROCARBUROS (Corregido nombre del menú) ---
-elif menu == "⛽ Control Hidrocarburos":
-    st.header("⛽ Control de Hidrocarburos")
+# --- 6. GESTIÓN DE COMBUSTIBLES & LUBRICANTES ---
+elif menu == "⛽ Gestión de Combustibles & Lubricantes":
+    st.header("⛽ Gestión de Combustibles & Lubricantes")
     with st.form("f_hidro"):
         c1, c2 = st.columns(2)
         t_m = c1.selectbox("Movimiento", ["Ingreso", "Egreso"])
@@ -2301,8 +2301,8 @@ elif menu == "⛽ Control Hidrocarburos":
                 conn.close()
                 st.success("Registrado.")
 
-# --- 7. REPORTE DE MOVIMIENTOS DE HIDROCARBUROS ---
-elif menu == "📋 Reporte Movimientos Hidro":
+# --- 7. BALANCES & REPORTES DE HIDROCARBUROS ---
+elif menu == "📋 Balances & Reportes de Hidrocarburos":
     st.header("📋 Detalle de Movimientos de Hidrocarburos")
     
     # Cargar datos
@@ -2470,9 +2470,9 @@ elif menu == "📋 Reporte Movimientos Hidro":
                         st.success("¡Registro de hidrocarburos eliminado con éxito!")
                         st.rerun()
 
-# --- 8. CONFIGURACIÓN (CON OPCIÓN DE BORRAR) ---
-elif menu == "⚙️ Configuración":
-    st.header("⚙️ Configuración del Sistema")
+# --- 8. DATOS MAESTROS & GESTIÓN QR ---
+elif menu == "⚙️ Datos Maestros & Gestión QR":
+    st.header("⚙️ Datos Maestros & Gestión QR")
     
     tab_datos_maestros, tab_usuarios = st.tabs(["📊 Datos Maestros", "👥 Gestión de Usuarios"])
     
@@ -2752,8 +2752,8 @@ elif menu == "⚙️ Configuración":
             else:
                 st.error("❌ Contraseña Maestra incorrecta.")
 
-# --- 9. EXPORTAR A EXCEL (Corregido nombre del menú) ---
-elif menu == "📥 Exportar Excel":
+# --- 9. EXPORTACIÓN GLOBAL DE DATOS ---
+elif menu == "📥 Exportación Global de Datos":
     st.header("📥 Descargar Reporte Completo")
     st.write("Presione el botón para generar un archivo Excel con todas las tablas de la base de datos.")
     
