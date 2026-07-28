@@ -100,55 +100,74 @@ st.markdown("""
     }
     
     /* Ajustes del Radio Group en Sidebar (Navegación tipo Botón Fracttal) */
-    div[data-testid="stSidebar"] div[role="radiogroup"] {
-        gap: 4px !important;
-        padding-top: 4px !important;
+    [data-testid="stSidebar"] div[role="radiogroup"] {
+        gap: 8px !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+    }
+    
+    /* Estilo del label de la sección "Menú:" */
+    [data-testid="stSidebar"] div[data-testid="stRadio"] > label {
+        font-weight: 700 !important;
+        color: #94a3b8 !important;
+        font-size: 12px !important;
+        margin-bottom: 10px !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.75px !important;
+        padding-left: 4px !important;
     }
     
     /* Quitar el círculo de selección por defecto */
-    div[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
         display: none !important;
     }
     
     /* Estilo del botón del menú lateral */
-    div[data-testid="stSidebar"] div[role="radiogroup"] label {
-        background-color: #1e293b !important;
-        border: 1px solid #334155 !important;
+    [data-testid="stSidebar"] div[role="radiogroup"] label {
+        background-color: #151f32 !important;
+        border: 1px solid #233149 !important;
         border-radius: 8px !important;
-        padding: 7px 12px !important;
-        transition: all 0.2s ease-in-out !important;
+        padding: 10px 14px !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
         cursor: pointer !important;
         width: 100% !important;
-        margin-bottom: 1px !important;
+        margin-bottom: 4px !important;
         display: flex !important;
         align-items: center !important;
     }
     
     /* Hover Sidebar */
-    div[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-        background-color: #334155 !important;
+    [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+        background-color: #1e2d4a !important;
         border-color: #10b981 !important;
-        transform: translateX(3px) !important;
+        transform: translateX(4px) !important;
+    }
+    
+    [data-testid="stSidebar"] div[role="radiogroup"] label:hover div[data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important;
     }
     
     /* Opción seleccionada Sidebar (Acento Esmeralda Fracttal) */
-    div[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
-        background: linear-gradient(90deg, #065f46 0%, #047857 100%) !important;
-        border-color: #10b981 !important;
+    [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
+        background: linear-gradient(90deg, #059669 0%, #10b981 100%) !important;
+        border-color: #34d399 !important;
         color: #ffffff !important;
         font-weight: 600 !important;
-        box-shadow: 0px 4px 12px rgba(16, 185, 129, 0.25) !important;
+        box-shadow: 0px 4px 12px rgba(16, 185, 129, 0.3) !important;
     }
     
     /* Texto del menú */
-    div[data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
-        font-size: 12.5px !important;
+    [data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
+        font-size: 13.5px !important;
         color: #e2e8f0 !important;
         margin: 0 !important;
+        line-height: 1.4 !important;
+        font-weight: 500 !important;
     }
     
-    div[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] div[data-testid="stMarkdownContainer"] p {
+    [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] div[data-testid="stMarkdownContainer"] p {
         color: #ffffff !important;
+        font-weight: 600 !important;
     }
     
     /* Tarjetas Métricas Fracttal Compactas */
