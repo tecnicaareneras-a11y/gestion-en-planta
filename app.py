@@ -22,14 +22,14 @@ st.markdown("""
         color: #f1f5f9 !important;
     }
 
-    /* Reducir espacio en blanco superior gigantesco de Streamlit */
+    /* Reducir espacio en blanco superior de Streamlit manteniendo margen para el header flotante */
     [data-testid="stAppViewContainer"] > .main {
-        padding-top: 1.2rem !important;
+        padding-top: 2.6rem !important;
         padding-bottom: 1.5rem !important;
     }
     
     .block-container {
-        padding-top: 0.8rem !important;
+        padding-top: 1.2rem !important;
         padding-bottom: 1.5rem !important;
         max-width: 96% !important;
     }
@@ -40,20 +40,20 @@ st.markdown("""
     }
 
     h1 {
-        font-size: 22px !important;
+        font-size: 21px !important;
         margin-top: 0px !important;
         margin-bottom: 6px !important;
         padding-top: 0px !important;
     }
     
     h2 {
-        font-size: 18px !important;
+        font-size: 17px !important;
         margin-top: 0px !important;
         margin-bottom: 6px !important;
     }
     
     h3 {
-        font-size: 15.5px !important;
+        font-size: 15px !important;
         margin-top: 0px !important;
         margin-bottom: 4px !important;
     }
@@ -70,7 +70,7 @@ st.markdown("""
     
     .fracttal-title {
         color: #ffffff;
-        font-size: 19px !important;
+        font-size: 18px !important;
         font-weight: 700;
         letter-spacing: -0.5px;
         margin: 0;
@@ -78,7 +78,7 @@ st.markdown("""
     
     .fracttal-subtitle {
         color: #94a3b8;
-        font-size: 12px !important;
+        font-size: 11.5px !important;
         margin-top: 2px;
     }
     
@@ -1392,6 +1392,8 @@ if menu == "🏠 Inicio - Tablero General":
         else:
             equipos_filtrados = equipos_clave
 
+        user_token_enc = urllib.parse.quote(st.session_state.get("token", ""))
+        user_usr_enc = urllib.parse.quote(st.session_state.get("usuario", ""))
         base_url_qr = "https://gestion-en-planta-adlc.streamlit.app"
         cols_matrix = st.columns(4)
         for idx, eq in enumerate(equipos_filtrados):
@@ -1409,7 +1411,7 @@ if menu == "🏠 Inicio - Tablero General":
                         else:
                             st.caption("Sin registros recientes")
                     
-                    url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(eq['nombre'])}"
+                    url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(eq['nombre'])}&usr={user_usr_enc}&tkn={user_token_enc}"
                     st.link_button("🔧 Ficha / Mant.", url_m, use_container_width=True)
 
     # --- PESTAÑA 2: ANALÍTICA DE MANTENIMIENTO ---
