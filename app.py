@@ -118,7 +118,9 @@ st.markdown("""
     }
     
     /* Quitar el círculo de selección por defecto */
-    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child,
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-of-type,
+    [data-testid="stSidebar"] div[role="radiogroup"] label input[type="radio"] + div {
         display: none !important;
     }
     
@@ -148,7 +150,8 @@ st.markdown("""
     }
     
     /* Opción seleccionada Sidebar (Acento Esmeralda Fracttal) */
-    [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
+    [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"],
+    [data-testid="stSidebar"] div[role="radiogroup"] label:has(input[type="radio"]:checked) {
         background: linear-gradient(90deg, #059669 0%, #10b981 100%) !important;
         border-color: #34d399 !important;
         color: #ffffff !important;
@@ -165,7 +168,8 @@ st.markdown("""
         font-weight: 500 !important;
     }
     
-    [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] div[data-testid="stMarkdownContainer"] p {
+    [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] div[data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] div[role="radiogroup"] label:has(input[type="radio"]:checked) div[data-testid="stMarkdownContainer"] p {
         color: #ffffff !important;
         font-weight: 600 !important;
     }
