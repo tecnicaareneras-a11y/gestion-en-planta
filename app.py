@@ -931,81 +931,100 @@ def mostrar_detalle_independiente(detail_id):
         historial_str = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else "Sin modificaciones."
         st.text_area("Log de cambios:", value=historial_str, height=140, disabled=True)
 
-    # --- SECCIÓN DE EDICIÓN ---
-    st.subheader("✏️ Editar Registro en Ficha")
-    with st.form("form_edicion_detalle"):
-        c1, c2 = st.columns(2)
-        with c1:
-            fecha_edit = st.date_input("Fecha", value=pd.to_datetime(registro["Fecha"]).date(), format="DD/MM/YYYY")
-            deposito_edit = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"], index=["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"].index(registro["Deposito"]) if registro["Deposito"] in ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"] else 0)
-            maquina_edit = st.selectbox("Máquina", maquinas_list_db, index=maquinas_list_db.index(registro["Maquina"]) if registro["Maquina"] in maquinas_list_db else 0)
-            operario_edit = st.selectbox("Técnico responsable", empleados_list_db, index=empleados_list_db.index(registro["Operario"]) if registro["Operario"] in empleados_list_db else 0)
-        with c2:
-            tipo_edit = st.selectbox("Tipo de mantenimiento", ["Correctivo", "Preventivo"], index=["Correctivo", "Preventivo"].index(registro["Tipo"]) if registro["Tipo"] in ["Correctivo", "Preventivo"] else 0)
-            inicio_edit = st.text_input("Hora Inicio", value=str(registro["Inicio"]))
-            fin_edit = st.text_input("Hora Fin", value=str(registro["Fin"]))
-            horimetro_edit = st.number_input("Horímetro", min_value=0.0, step=0.1, value=float(registro["Horimetro"]) if str(registro["Horimetro"]).strip() else 0.0, format="%.1f")
-            
-        detalle_edit = st.text_area("Detalle (Actividad / Repuestos)", value=str(registro["Detalle"]))
-        
-        guardar = st.form_submit_button("💾 Guardar Cambios en Ficha")
-        
-        if guardar:
-            cambios = []
-            if str(registro['Fecha']) != fecha_edit.strftime("%Y-%m-%d"):
-                cambios.append(f"Fecha: '{registro['Fecha']}' -> '{fecha_edit.strftime('%Y-%m-%d')}'")
-            if str(registro['Deposito']) != deposito_edit:
-                cambios.append(f"Depósito: '{registro['Deposito']}' -> '{deposito_edit}'")
-            if str(registro['Maquina']) != maquina_edit:
-                cambios.append(f"Máquina: '{registro['Maquina']}' -> '{maquina_edit}'")
-            if str(registro['Operario']) != operario_edit:
-                cambios.append(f"Técnico: '{registro['Operario']}' -> '{operario_edit}'")
-            if str(registro['Tipo']) != tipo_edit:
-                cambios.append(f"Tipo: '{registro['Tipo']}' -> '{tipo_edit}'")
-            if str(registro['Inicio']) != inicio_edit:
-                cambios.append(f"Inicio: '{registro['Inicio']}' -> '{inicio_edit}'")
-            if str(registro['Fin']) != fin_edit:
-                cambios.append(f"Fin: '{registro['Fin']}' -> '{fin_edit}'")
-            if float(registro['Horimetro']) != float(horimetro_edit):
-                cambios.append(f"Horímetro: '{registro['Horimetro']}' -> '{horimetro_edit}'")
-            if str(registro['Detalle']).strip() != detalle_edit.strip():
-                cambios.append(f"Detalle modificado")
+    # --- SECCIÓN DE EDICIÓN CON BOTÓN Y CONTRASEÑA ---
+    if "edit_ficha_activa" not in st.session_state:
+        st.session_state["edit_ficha_activa"] = False
+
+    boton_edit_lbl = "❌ Cerrar Edición" if st.session_state["edit_ficha_activa"] else "✏️ Editar / 🗑️ Eliminar este Reporte"
+    if st.button(boton_edit_lbl, key=f"btn_toggle_ficha_{detail_id}", use_container_width=True):
+        st.session_state["edit_ficha_activa"] = not st.session_state["edit_ficha_activa"]
+        st.rerun()
+
+    if st.session_state["edit_ficha_activa"]:
+        with st.container(border=True):
+            st.subheader("✏️ Edición de la Ficha de Mantenimiento")
+            with st.form("form_edicion_detalle"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    fecha_edit = st.date_input("Fecha", value=pd.to_datetime(registro["Fecha"]).date(), format="DD/MM/YYYY")
+                    deposito_edit = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"], index=["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"].index(registro["Deposito"]) if registro["Deposito"] in ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"] else 0)
+                    maquina_edit = st.selectbox("Máquina", maquinas_list_db, index=maquinas_list_db.index(registro["Maquina"]) if registro["Maquina"] in maquinas_list_db else 0)
+                    operario_edit = st.selectbox("Técnico responsable", empleados_list_db, index=empleados_list_db.index(registro["Operario"]) if registro["Operario"] in empleados_list_db else 0)
+                with c2:
+                    tipo_edit = st.selectbox("Tipo de mantenimiento", ["Correctivo", "Preventivo"], index=["Correctivo", "Preventivo"].index(registro["Tipo"]) if registro["Tipo"] in ["Correctivo", "Preventivo"] else 0)
+                    inicio_edit = st.text_input("Hora Inicio", value=str(registro["Inicio"]))
+                    fin_edit = st.text_input("Hora Fin", value=str(registro["Fin"]))
+                    horimetro_edit = st.number_input("Horímetro", min_value=0.0, step=0.1, value=float(registro["Horimetro"]) if str(registro["Horimetro"]).strip() else 0.0, format="%.1f")
+                    
+                detalle_edit = st.text_area("Detalle (Actividad / Repuestos)", value=str(registro["Detalle"]))
+                pass_edit = st.text_input("🔑 Contraseña de confirmación (tu clave de ingreso)", type="password")
                 
-            if cambios:
-                log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                detalle_cambios = ", ".join(cambios)
-                nuevo_log = f"{log_fecha} - Modificado: {detalle_cambios}"
+                col_save, col_del = st.columns([2, 1])
+                guardar = col_save.form_submit_button("💾 Guardar Cambios en Ficha", use_container_width=True)
+                eliminar = col_del.form_submit_button("🗑️ Eliminar Ficha", use_container_width=True)
                 
-                historial_actual = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else ""
-                nuevo_historial = (historial_actual + "\n" + nuevo_log).strip()
-                
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                UPDATE mantenimientos SET
-                    Fecha = ?, Deposito = ?, Maquina = ?, Operario = ?, Tipo = ?, Inicio = ?, Fin = ?, Horimetro = ?, Detalle = ?, HistorialModificaciones = ?
-                WHERE id = ?
-                """, (fecha_edit.strftime("%Y-%m-%d"), deposito_edit, maquina_edit, operario_edit, tipo_edit, inicio_edit, fin_edit, horimetro_edit, detalle_edit, nuevo_historial, detail_id))
-                conn.commit()
-                conn.close()
-                st.success("¡El registro se actualizó y se guardó en el historial!")
-                st.rerun()
-            else:
-                st.info("No se detectaron cambios para guardar.")
-                
-    st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
-    with st.expander("🗑️ Zona de Peligro - Eliminar Registro"):
-        st.warning("⚠️ Esta acción es irreversible y eliminará permanentemente este registro de mantenimiento de la base de datos.")
-        confirmar_eliminar = st.button("🗑️ Confirmar Eliminación Permanente", key=f"del_ficha_{detail_id}", use_container_width=True)
-        if confirmar_eliminar:
-            conn = get_connection()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM mantenimientos WHERE id = ?", (detail_id,))
-            conn.commit()
-            conn.close()
-            st.success("¡Registro eliminado con éxito!")
-            st.query_params.clear()
-            st.rerun()
+                usr_act = st.session_state.get("usuario", "")
+
+                if guardar:
+                    if not verificar_password_usuario(usr_act, pass_edit):
+                        st.error("🔒 Contraseña incorrecta o no ingresada. No se pudieron guardar los cambios.")
+                    else:
+                        cambios = []
+                        if str(registro['Fecha']) != fecha_edit.strftime("%Y-%m-%d"):
+                            cambios.append(f"Fecha: '{registro['Fecha']}' -> '{fecha_edit.strftime('%Y-%m-%d')}'")
+                        if str(registro['Deposito']) != deposito_edit:
+                            cambios.append(f"Depósito: '{registro['Deposito']}' -> '{deposito_edit}'")
+                        if str(registro['Maquina']) != maquina_edit:
+                            cambios.append(f"Máquina: '{registro['Maquina']}' -> '{maquina_edit}'")
+                        if str(registro['Operario']) != operario_edit:
+                            cambios.append(f"Técnico: '{registro['Operario']}' -> '{operario_edit}'")
+                        if str(registro['Tipo']) != tipo_edit:
+                            cambios.append(f"Tipo: '{registro['Tipo']}' -> '{tipo_edit}'")
+                        if str(registro['Inicio']) != inicio_edit:
+                            cambios.append(f"Inicio: '{registro['Inicio']}' -> '{inicio_edit}'")
+                        if str(registro['Fin']) != fin_edit:
+                            cambios.append(f"Fin: '{registro['Fin']}' -> '{fin_edit}'")
+                        if float(registro['Horimetro']) != float(horimetro_edit):
+                            cambios.append(f"Horímetro: '{registro['Horimetro']}' -> '{horimetro_edit}'")
+                        if str(registro['Detalle']).strip() != detalle_edit.strip():
+                            cambios.append(f"Detalle modificado")
+                            
+                        if cambios:
+                            log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            detalle_cambios = ", ".join(cambios)
+                            usr_str = usr_act if usr_act else "Usuario"
+                            nuevo_log = f"{log_fecha} - Modificado por usuario {usr_str}: {detalle_cambios}"
+                            
+                            historial_actual = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else ""
+                            nuevo_historial = (historial_actual + "\n" + nuevo_log).strip()
+                            
+                            conn = get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                            UPDATE mantenimientos SET
+                                Fecha = ?, Deposito = ?, Maquina = ?, Operario = ?, Tipo = ?, Inicio = ?, Fin = ?, Horimetro = ?, Detalle = ?, HistorialModificaciones = ?
+                            WHERE id = ?
+                            """, (fecha_edit.strftime("%Y-%m-%d"), deposito_edit, maquina_edit, operario_edit, tipo_edit, inicio_edit, fin_edit, horimetro_edit, detalle_edit, nuevo_historial, detail_id))
+                            conn.commit()
+                            conn.close()
+                            st.success("¡El registro se actualizó y se guardó en el historial!")
+                            st.session_state["edit_ficha_activa"] = False
+                            st.rerun()
+                        else:
+                            st.info("No se detectaron cambios para guardar.")
+
+                if eliminar:
+                    if not verificar_password_usuario(usr_act, pass_edit):
+                        st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM mantenimientos WHERE id = ?", (detail_id,))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro eliminado con éxito!")
+                        st.query_params.clear()
+                        st.rerun()
 
 def mostrar_ficha_checklist_independiente(chk_id):
     conn = get_connection()
@@ -1889,7 +1908,7 @@ elif menu == "📋 Reporte Mant. Realizado":
                 use_container_width=True
             )
 
-            st.caption(f"Registros encontrados: {len(df_filtrado)} (💡 Haz clic en 'Abrir Ficha' de cualquier fila para ver el detalle en una nueva pestaña)")
+            st.caption(f"Registros encontrados: {len(df_filtrado)} (💡 Haz clic en 'Abrir Ficha' de cualquier fila para ver los detalles, editar o eliminar el reporte en una nueva pestaña)")
             
             # Mostrar la tabla con el enlace a nueva pestaña
             st.dataframe(
@@ -1900,169 +1919,6 @@ elif menu == "📋 Reporte Mant. Realizado":
                 use_container_width=True,
                 hide_index=True
             )
-
-            st.subheader("✏️ Editor visual de registros")
-            st.markdown("Seleccioná un registro para editarlo o eliminarlo. El panel está organizado en tarjetas para una lectura más cómoda.")
-            
-            # Guardamos el ID real de la base de datos junto con la opción visual
-            opciones_registro = ["-- Seleccionar --"]
-            mapping_opciones = {} # Mapea la opción de texto al ID real en la base de datos
-            
-            for _, row in df_filtrado.iterrows():
-                texto_opcion = f"Ref: {row['id']} | {formatear_fecha_visible(row['Fecha'])} | {row['Deposito']} | {row['Maquina']} | {row['Operario']}"
-                opciones_registro.append(texto_opcion)
-                mapping_opciones[texto_opcion] = row['id']
-                
-            seleccion = st.selectbox("Seleccioná un registro", opciones_registro)
-
-            if seleccion != "-- Seleccionar --":
-                db_id = mapping_opciones[seleccion]
-                
-                # Botón para abrir detalle completo en nueva pestaña
-                st.link_button("🔎 Abrir Ficha Detallada en Nueva Pestaña", f"{base_url}/?id={db_id}&usr={user_usr}&tkn={user_token}", use_container_width=True)
-                st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
-                
-                # Traer el registro fresco directamente por ID
-                registro = df_mant[df_mant["id"] == db_id].iloc[0]
-
-                if "editor_activo" not in st.session_state:
-                    st.session_state["editor_activo"] = None
-
-                editando = st.session_state["editor_activo"] == db_id
-
-                with st.container(border=True):
-                    st.subheader("📌 Ficha del mantenimiento")
-                    col_info_a, col_info_b = st.columns(2)
-                    with col_info_a:
-                        st.write(f"**Fecha:** {formatear_fecha_visible(registro['Fecha'])}")
-                        st.write(f"**Depósito:** {registro['Deposito']}")
-                        st.write(f"**Máquina:** {registro['Maquina']}")
-                        st.write(f"**Operario:** {registro['Operario']}")
-                    with col_info_b:
-                        st.write(f"**Tipo:** {registro['Tipo']}")
-                        st.write(f"**Inicio:** {registro['Inicio']}")
-                        st.write(f"**Fin:** {registro['Fin']}")
-                        st.write(f"**Horímetro:** {registro['Horimetro']}")
-
-                    creador_m = registro.get('CreadoPor') if pd.notna(registro.get('CreadoPor')) else "Desconocido"
-                    fecha_crea_m = formatear_fecha_hora_visible(registro.get('FechaCreacion')) if pd.notna(registro.get('FechaCreacion')) else "N/A"
-                    st.caption(f"👤 **Primera carga por:** {creador_m} | 📅 **Fecha/Hora de Carga:** {fecha_crea_m}")
-
-                    st.markdown("### 📝 Detalle de la tarea y repuestos usados")
-                    detalle_guardado = str(registro["Detalle"]).strip()
-                    if detalle_guardado:
-                        st.markdown(
-                            f"""
-                            <div style="padding:16px 18px; border-radius:10px; background:#1f232a; border:1px solid #444; color:#f1f5f9; white-space:pre-line; line-height:1.4;">
-                            {detalle_guardado}
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.info("Este registro no tiene detalle guardado.")
-
-                    historial_m = str(registro.get('HistorialModificaciones', '')).strip() if pd.notna(registro.get('HistorialModificaciones')) else ""
-                    if historial_m:
-                        with st.expander("📜 Historial de Cambios y Auditoría"):
-                            st.text(historial_m)
-
-                st.caption("El panel de edición solo se habilita al presionar Editar.")
-                boton_label = "❌ Cerrar edición" if editando else "✏️ Editar este registro"
-                if st.button(boton_label, key=f"toggle_edit_{db_id}"):
-                    st.session_state["editor_activo"] = None if editando else db_id
-                    st.rerun()
-
-                if editando:
-                    with st.container(border=True):
-                        st.subheader("✏️ Edición del registro")
-                        with st.form(f"editar_registro_{db_id}"):
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                fecha_edit = st.date_input("Fecha", value=pd.to_datetime(registro["Fecha"]).date(), format="DD/MM/YYYY")
-                                deposito_edit = st.selectbox("Depósito", ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"], index=["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"].index(registro["Deposito"]) if registro["Deposito"] in ["Depósito Baigorria", "Depósito San Lorenzo", "Santa Fe"] else 0)
-                                maquina_edit = st.selectbox("Máquina", maquinas_list, index=maquinas_list.index(registro["Maquina"]) if registro["Maquina"] in maquinas_list else 0)
-                                operario_edit = st.selectbox("Técnico responsable", empleados_list, index=empleados_list.index(registro["Operario"]) if registro["Operario"] in empleados_list else 0)
-                            with col_b:
-                                tipo_edit = st.selectbox("Tipo de mantenimiento", ["Correctivo", "Preventivo"], index=["Correctivo", "Preventivo"].index(registro["Tipo"]) if registro["Tipo"] in ["Correctivo", "Preventivo"] else 0)
-                                inicio_edit = st.text_input("Hora Inicio", value=str(registro["Inicio"]))
-                                fin_edit = st.text_input("Hora Fin", value=str(registro["Fin"]))
-                                horimetro_edit = st.number_input("Horímetro", min_value=0.0, step=0.1, value=float(registro["Horimetro"]) if str(registro["Horimetro"]).strip() else 0.0, format="%.1f")
-                            detalle_edit = st.text_area("Detalle", value=str(registro["Detalle"]), height=160)
-
-                            pass_mant = st.text_input("🔑 Contraseña para confirmar cambio o eliminación", type="password")
-
-                            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-                            col_editar, col_eliminar = st.columns([2, 1])
-                            with col_editar:
-                                guardar = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                            with col_eliminar:
-                                eliminar = st.form_submit_button("🗑️ Eliminar", use_container_width=True)
-
-                            if guardar:
-                                usr_act = st.session_state.get("usuario", "")
-                                if not verificar_password_usuario(usr_act, pass_mant):
-                                    st.error("🔒 Contraseña incorrecta o no ingresada. No se pudieron guardar los cambios.")
-                                else:
-                                    cambios = []
-                                    if str(registro['Fecha']) != fecha_edit.strftime("%Y-%m-%d"):
-                                        cambios.append(f"Fecha: '{registro['Fecha']}' -> '{fecha_edit.strftime('%Y-%m-%d')}'")
-                                    if str(registro['Deposito']) != deposito_edit:
-                                        cambios.append(f"Depósito: '{registro['Deposito']}' -> '{deposito_edit}'")
-                                    if str(registro['Maquina']) != maquina_edit:
-                                        cambios.append(f"Máquina: '{registro['Maquina']}' -> '{maquina_edit}'")
-                                    if str(registro['Operario']) != operario_edit:
-                                        cambios.append(f"Técnico: '{registro['Operario']}' -> '{operario_edit}'")
-                                    if str(registro['Tipo']) != tipo_edit:
-                                        cambios.append(f"Tipo: '{registro['Tipo']}' -> '{tipo_edit}'")
-                                    if str(registro['Inicio']) != inicio_edit:
-                                        cambios.append(f"Inicio: '{registro['Inicio']}' -> '{inicio_edit}'")
-                                    if str(registro['Fin']) != fin_edit:
-                                        cambios.append(f"Fin: '{registro['Fin']}' -> '{fin_edit}'")
-                                    if float(registro['Horimetro']) != float(horimetro_edit):
-                                        cambios.append(f"Horímetro: '{registro['Horimetro']}' -> '{horimetro_edit}'")
-                                    if str(registro['Detalle']).strip() != detalle_edit.strip():
-                                        cambios.append(f"Detalle modificado")
-                                        
-                                    if cambios:
-                                        log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        detalle_cambios = ", ".join(cambios)
-                                        usr_str = usr_act if usr_act else "Usuario"
-                                        nuevo_log = f"{log_fecha} - Modificado por {usr_str}: {detalle_cambios}"
-                                        
-                                        historial_actual = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else ""
-                                        nuevo_historial = (historial_actual + "\n" + nuevo_log).strip()
-                                    else:
-                                        nuevo_historial = str(registro['HistorialModificaciones']) if pd.notna(registro['HistorialModificaciones']) else ""
-
-                                    conn = get_connection()
-                                    cursor = conn.cursor()
-                                    cursor.execute("""
-                                    UPDATE mantenimientos SET
-                                        Fecha = ?, Deposito = ?, Maquina = ?, Operario = ?, Tipo = ?, Inicio = ?, Fin = ?, Horimetro = ?, Detalle = ?, HistorialModificaciones = ?
-                                    WHERE id = ?
-                                    """, (fecha_edit.strftime("%Y-%m-%d"), deposito_edit, maquina_edit, operario_edit, tipo_edit, inicio_edit, fin_edit, horimetro_edit, detalle_edit, nuevo_historial, db_id))
-                                    conn.commit()
-                                    conn.close()
-                                    
-                                    st.success("Registro actualizado con éxito")
-                                    st.session_state["editor_activo"] = None
-                                    st.rerun()
-
-                            if eliminar:
-                                usr_act = st.session_state.get("usuario", "")
-                                if not verificar_password_usuario(usr_act, pass_mant):
-                                    st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
-                                else:
-                                    conn = get_connection()
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM mantenimientos WHERE id = ?", (db_id,))
-                                    conn.commit()
-                                    conn.close()
-                                    
-                                    st.warning("Registro eliminado con éxito")
-                                    st.session_state["editor_activo"] = None
-                                    st.rerun()
                                 
     with tab_checklist:
         st.subheader("📋 Controles Diarios de Equipos Realizados")
@@ -2486,87 +2342,86 @@ elif menu == "📋 Reporte Movimientos Stock":
         # --- SECCIÓN: EDITAR / ELIMINAR REGISTROS DE STOCK ---
         st.divider()
         st.subheader("✏️ Corregir o Eliminar Registro de Stock")
-        with st.expander("🛠️ Hacer ajustes en movimientos"):
-            opciones_editar = ["-- Seleccionar --"] + [f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Uds)" for _, r in df_s.iterrows()]
-            registro_a_editar = st.selectbox("Seleccionar registro de stock a modificar", opciones_editar)
+        opciones_editar = ["-- Seleccionar --"] + [f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Uds)" for _, r in df_s.sort_values(by='id', ascending=False).iterrows()]
+        registro_a_editar = st.selectbox("Seleccionar registro de stock a modificar o eliminar", opciones_editar, key="sel_stock_edit")
+        
+        if registro_a_editar != "-- Seleccionar --":
+            db_id = int(registro_a_editar.split(" | ")[0].replace("ID ", ""))
+            row = df_s[df_s['id'] == db_id].iloc[0]
             
-            if registro_a_editar != "-- Seleccionar --":
-                db_id = int(registro_a_editar.split(" | ")[0].replace("ID ", ""))
-                row = df_s[df_s['id'] == db_id].iloc[0]
+            creador_s = row.get('CreadoPor') if pd.notna(row.get('CreadoPor')) else "Desconocido"
+            fecha_crea_s = formatear_fecha_hora_visible(row.get('FechaCreacion')) if pd.notna(row.get('FechaCreacion')) else "N/A"
+            st.info(f"👤 **Primera Carga por:** {creador_s} | 📅 **Fecha/Hora de Carga:** {fecha_crea_s}")
+
+            historial_stk = str(row.get('HistorialModificaciones', '')).strip() if pd.notna(row.get('HistorialModificaciones')) else ""
+            if historial_stk:
+                with st.expander("📜 Historial de Modificaciones y Auditoría"):
+                    st.text(historial_stk)
+
+            with st.form(f"form_edit_stock_{db_id}"):
+                c_ed1, c_ed2 = st.columns(2)
+                edit_fecha = c_ed1.date_input("Fecha", pd.to_datetime(row['Fecha']).date(), format="DD/MM/YYYY")
+                edit_prod = c_ed1.text_input("Nombre del Producto / Repuesto", value=str(row['Producto']))
+                edit_mov = c_ed2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row['Movimiento'] == "Ingreso" else 1)
+                edit_cant = c_ed2.number_input("Cantidad", value=float(row['Cantidad']), min_value=0.0)
+                edit_dest = st.text_input("Destino / Ubicación", value=str(row['Destino']))
                 
-                creador_s = row.get('CreadoPor') if pd.notna(row.get('CreadoPor')) else "Desconocido"
-                fecha_crea_s = formatear_fecha_hora_visible(row.get('FechaCreacion')) if pd.notna(row.get('FechaCreacion')) else "N/A"
-                st.info(f"👤 **Primera Carga por:** {creador_s} | 📅 **Fecha/Hora de Carga:** {fecha_crea_s}")
+                pass_stk = st.text_input("🔑 Contraseña para confirmar cambio o eliminación", type="password")
 
-                historial_stk = str(row.get('HistorialModificaciones', '')).strip() if pd.notna(row.get('HistorialModificaciones')) else ""
-                if historial_stk:
-                    with st.expander("📜 Historial de Modificaciones y Auditoría"):
-                        st.text(historial_stk)
+                col_b1, col_b2 = st.columns(2)
+                btn_save = col_b1.form_submit_button("💾 Guardar Cambios")
+                btn_delete = col_b2.form_submit_button("🗑️ Eliminar Registro")
+                
+                if btn_save:
+                    usr_act = st.session_state.get("usuario", "")
+                    if not verificar_password_usuario(usr_act, pass_stk):
+                        st.error("🔒 Contraseña incorrecta o no ingresada. No se guardaron los cambios.")
+                    elif not edit_prod.strip():
+                        st.error("⚠️ El nombre del producto no puede estar vacío.")
+                    else:
+                        cambios_s = []
+                        if str(row['Fecha']) != edit_fecha.strftime("%Y-%m-%d"):
+                            cambios_s.append(f"Fecha: '{row['Fecha']}' -> '{edit_fecha.strftime('%Y-%m-%d')}'")
+                        if str(row['Producto']) != edit_prod.strip():
+                            cambios_s.append(f"Producto: '{row['Producto']}' -> '{edit_prod.strip()}'")
+                        if str(row['Movimiento']) != edit_mov:
+                            cambios_s.append(f"Movimiento: '{row['Movimiento']}' -> '{edit_mov}'")
+                        if float(row['Cantidad']) != float(edit_cant):
+                            cambios_s.append(f"Cantidad: {row['Cantidad']} -> {edit_cant}")
+                        if str(row['Destino']) != edit_dest.strip():
+                            cambios_s.append(f"Destino: '{row['Destino']}' -> '{edit_dest.strip()}'")
+                        
+                        log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        usr_str = usr_act if usr_act else "Usuario"
+                        detalle_c = ", ".join(cambios_s) if cambios_s else "Sin cambios"
+                        nuevo_log = f"{log_fecha} - Modificado por usuario {usr_str}: {detalle_c}"
+                        hist_act = str(row.get('HistorialModificaciones', '')) if pd.notna(row.get('HistorialModificaciones')) else ""
+                        nuevo_hist = (hist_act + "\n" + nuevo_log).strip()
 
-                with st.form(f"form_edit_stock_{db_id}"):
-                    c_ed1, c_ed2 = st.columns(2)
-                    edit_fecha = c_ed1.date_input("Fecha", pd.to_datetime(row['Fecha']).date(), format="DD/MM/YYYY")
-                    edit_prod = c_ed1.text_input("Nombre del Producto / Repuesto", value=str(row['Producto']))
-                    edit_mov = c_ed2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row['Movimiento'] == "Ingreso" else 1)
-                    edit_cant = c_ed2.number_input("Cantidad", value=float(row['Cantidad']), min_value=0.0)
-                    edit_dest = st.text_input("Destino / Ubicación", value=str(row['Destino']))
-                    
-                    pass_stk = st.text_input("🔑 Contraseña para confirmar cambio o eliminación", type="password")
-
-                    col_b1, col_b2 = st.columns(2)
-                    btn_save = col_b1.form_submit_button("💾 Guardar Cambios")
-                    btn_delete = col_b2.form_submit_button("🗑️ Eliminar Registro")
-                    
-                    if btn_save:
-                        usr_act = st.session_state.get("usuario", "")
-                        if not verificar_password_usuario(usr_act, pass_stk):
-                            st.error("🔒 Contraseña incorrecta o no ingresada. No se guardaron los cambios.")
-                        elif not edit_prod.strip():
-                            st.error("⚠️ El nombre del producto no puede estar vacío.")
-                        else:
-                            cambios_s = []
-                            if str(row['Fecha']) != edit_fecha.strftime("%Y-%m-%d"):
-                                cambios_s.append(f"Fecha: '{row['Fecha']}' -> '{edit_fecha.strftime('%Y-%m-%d')}'")
-                            if str(row['Producto']) != edit_prod.strip():
-                                cambios_s.append(f"Producto: '{row['Producto']}' -> '{edit_prod.strip()}'")
-                            if str(row['Movimiento']) != edit_mov:
-                                cambios_s.append(f"Movimiento: '{row['Movimiento']}' -> '{edit_mov}'")
-                            if float(row['Cantidad']) != float(edit_cant):
-                                cambios_s.append(f"Cantidad: {row['Cantidad']} -> {edit_cant}")
-                            if str(row['Destino']) != edit_dest.strip():
-                                cambios_s.append(f"Destino: '{row['Destino']}' -> '{edit_dest.strip()}'")
-                            
-                            log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            usr_str = usr_act if usr_act else "Usuario"
-                            detalle_c = ", ".join(cambios_s) if cambios_s else "Sin cambios"
-                            nuevo_log = f"{log_fecha} - Modificado por usuario {usr_str}: {detalle_c}"
-                            hist_act = str(row.get('HistorialModificaciones', '')) if pd.notna(row.get('HistorialModificaciones')) else ""
-                            nuevo_hist = (hist_act + "\n" + nuevo_log).strip()
-
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("""
-                            UPDATE stock SET
-                                Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, HistorialModificaciones = ?
-                            WHERE id = ?
-                            """, (edit_fecha.strftime("%Y-%m-%d"), edit_prod.strip(), edit_mov, edit_cant, edit_dest.strip(), nuevo_hist, db_id))
-                            conn.commit()
-                            conn.close()
-                            st.success("¡Registro de stock actualizado con éxito!")
-                            st.rerun()
-                            
-                    if btn_delete:
-                        usr_act = st.session_state.get("usuario", "")
-                        if not verificar_password_usuario(usr_act, pass_stk):
-                            st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
-                        else:
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM stock WHERE id = ?", (db_id,))
-                            conn.commit()
-                            conn.close()
-                            st.success("¡Registro de stock eliminado con éxito!")
-                            st.rerun()
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                        UPDATE stock SET
+                            Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, HistorialModificaciones = ?
+                        WHERE id = ?
+                        """, (edit_fecha.strftime("%Y-%m-%d"), edit_prod.strip(), edit_mov, edit_cant, edit_dest.strip(), nuevo_hist, db_id))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro de stock actualizado con éxito!")
+                        st.rerun()
+                        
+                if btn_delete:
+                    usr_act = st.session_state.get("usuario", "")
+                    if not verificar_password_usuario(usr_act, pass_stk):
+                        st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM stock WHERE id = ?", (db_id,))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro de stock eliminado con éxito!")
+                        st.rerun()
 
 # --- 6. GESTIÓN DE COMBUSTIBLES & LUBRICANTES ---
 elif menu == "⛽ Gestión de Combustibles & Lubricantes":
@@ -2721,92 +2576,91 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
         # --- SECCIÓN: EDITAR / ELIMINAR REGISTROS DE HIDROCARBUROS ---
         st.divider()
         st.subheader("✏️ Corregir o Eliminar Registro de Hidrocarburos")
-        with st.expander("🛠️ Hacer ajustes en movimientos"):
-            opciones_editar_h = ["-- Seleccionar --"] + [f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts)" for _, r in df_h.iterrows()]
-            registro_a_editar_h = st.selectbox("Seleccionar registro de hidrocarburos a modificar", opciones_editar_h)
+        opciones_editar_h = ["-- Seleccionar --"] + [f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts)" for _, r in df_h.sort_values(by='id', ascending=False).iterrows()]
+        registro_a_editar_h = st.selectbox("Seleccionar registro de hidrocarburos a modificar o eliminar", opciones_editar_h, key="sel_hidro_edit")
+        
+        if registro_a_editar_h != "-- Seleccionar --":
+            db_id_h = int(registro_a_editar_h.split(" | ")[0].replace("ID ", ""))
+            row_h = df_h[df_h['id'] == db_id_h].iloc[0]
             
-            if registro_a_editar_h != "-- Seleccionar --":
-                db_id_h = int(registro_a_editar_h.split(" | ")[0].replace("ID ", ""))
-                row_h = df_h[df_h['id'] == db_id_h].iloc[0]
+            creador_h = row_h.get('CreadoPor') if pd.notna(row_h.get('CreadoPor')) else "Desconocido"
+            fecha_crea_h = formatear_fecha_hora_visible(row_h.get('FechaCreacion')) if pd.notna(row_h.get('FechaCreacion')) else "N/A"
+            st.info(f"👤 **Primera Carga por:** {creador_h} | 📅 **Fecha/Hora de Carga:** {fecha_crea_h}")
+
+            historial_hd = str(row_h.get('HistorialModificaciones', '')).strip() if pd.notna(row_h.get('HistorialModificaciones')) else ""
+            if historial_hd:
+                with st.expander("📜 Historial de Modificaciones y Auditoría"):
+                    st.text(historial_hd)
+
+            with st.form(f"form_edit_hidro_{db_id_h}"):
+                c_edh1, c_edh2 = st.columns(2)
+                edit_fecha_h = c_edh1.date_input("Fecha", pd.to_datetime(row_h['Fecha']).date(), format="DD/MM/YYYY")
+                edit_prod_h = c_edh1.selectbox("Tipo de Hidrocarburo", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], 
+                                               index=["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"].index(row_h['Producto']) if row_h['Producto'] in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"] else 0)
+                edit_mov_h = c_edh2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row_h['Movimiento'] == "Ingreso" else 1)
+                edit_cant_h = c_edh2.number_input("Cantidad (Litros)", value=float(row_h['Cantidad']), min_value=0.0)
                 
-                creador_h = row_h.get('CreadoPor') if pd.notna(row_h.get('CreadoPor')) else "Desconocido"
-                fecha_crea_h = formatear_fecha_hora_visible(row_h.get('FechaCreacion')) if pd.notna(row_h.get('FechaCreacion')) else "N/A"
-                st.info(f"👤 **Primera Carga por:** {creador_h} | 📅 **Fecha/Hora de Carga:** {fecha_crea_h}")
+                edit_dest_h = st.selectbox("Destino", ["Stock Central"] + maquinas_list, 
+                                           index=(["Stock Central"] + maquinas_list).index(row_h['Destino']) if row_h['Destino'] in (["Stock Central"] + maquinas_list) else None)
+                edit_oper_h = st.selectbox("Responsable", empleados_list, 
+                                           index=empleados_list.index(row_h['Operario']) if row_h['Operario'] in empleados_list else None)
+                
+                pass_hidro = st.text_input("🔑 Contraseña para confirmar cambio o eliminación", type="password")
 
-                historial_hd = str(row_h.get('HistorialModificaciones', '')).strip() if pd.notna(row_h.get('HistorialModificaciones')) else ""
-                if historial_hd:
-                    with st.expander("📜 Historial de Modificaciones y Auditoría"):
-                        st.text(historial_hd)
+                col_bh1, col_bh2 = st.columns(2)
+                btn_save_h = col_bh1.form_submit_button("💾 Guardar Cambios")
+                btn_delete_h = col_bh2.form_submit_button("🗑️ Eliminar Registro")
+                
+                if btn_save_h:
+                    usr_act = st.session_state.get("usuario", "")
+                    if not verificar_password_usuario(usr_act, pass_hidro):
+                        st.error("🔒 Contraseña incorrecta o no ingresada. No se guardaron los cambios.")
+                    else:
+                        cambios_h = []
+                        if str(row_h['Fecha']) != edit_fecha_h.strftime("%Y-%m-%d"):
+                            cambios_h.append(f"Fecha: '{row_h['Fecha']}' -> '{edit_fecha_h.strftime('%Y-%m-%d')}'")
+                        if str(row_h['Producto']) != str(edit_prod_h):
+                            cambios_h.append(f"Producto: '{row_h['Producto']}' -> '{edit_prod_h}'")
+                        if str(row_h['Movimiento']) != str(edit_mov_h):
+                            cambios_h.append(f"Movimiento: '{row_h['Movimiento']}' -> '{edit_mov_h}'")
+                        if float(row_h['Cantidad']) != float(edit_cant_h):
+                            cambios_h.append(f"Cantidad: {row_h['Cantidad']} -> {edit_cant_h}")
+                        if str(row_h['Destino']) != str(edit_dest_h):
+                            cambios_h.append(f"Destino: '{row_h['Destino']}' -> '{edit_dest_h}'")
+                        if str(row_h['Operario']) != str(edit_oper_h):
+                            cambios_h.append(f"Responsable: '{row_h['Operario']}' -> '{edit_oper_h}'")
+                        
+                        log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        usr_str = usr_act if usr_act else "Usuario"
+                        detalle_c = ", ".join(cambios_h) if cambios_h else "Sin cambios"
+                        nuevo_log = f"{log_fecha} - Modificado por usuario {usr_str}: {detalle_c}"
+                        hist_act = str(row_h.get('HistorialModificaciones', '')) if pd.notna(row_h.get('HistorialModificaciones')) else ""
+                        nuevo_hist = (hist_act + "\n" + nuevo_log).strip()
 
-                with st.form(f"form_edit_hidro_{db_id_h}"):
-                    c_edh1, c_edh2 = st.columns(2)
-                    edit_fecha_h = c_edh1.date_input("Fecha", pd.to_datetime(row_h['Fecha']).date(), format="DD/MM/YYYY")
-                    edit_prod_h = c_edh1.selectbox("Tipo de Hidrocarburo", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], 
-                                                   index=["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"].index(row_h['Producto']) if row_h['Producto'] in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"] else 0)
-                    edit_mov_h = c_edh2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row_h['Movimiento'] == "Ingreso" else 1)
-                    edit_cant_h = c_edh2.number_input("Cantidad (Litros)", value=float(row_h['Cantidad']), min_value=0.0)
-                    
-                    edit_dest_h = st.selectbox("Destino", ["Stock Central"] + maquinas_list, 
-                                               index=(["Stock Central"] + maquinas_list).index(row_h['Destino']) if row_h['Destino'] in (["Stock Central"] + maquinas_list) else None)
-                    edit_oper_h = st.selectbox("Responsable", empleados_list, 
-                                               index=empleados_list.index(row_h['Operario']) if row_h['Operario'] in empleados_list else None)
-                    
-                    pass_hidro = st.text_input("🔑 Contraseña para confirmar cambio o eliminación", type="password")
-
-                    col_bh1, col_bh2 = st.columns(2)
-                    btn_save_h = col_bh1.form_submit_button("💾 Guardar Cambios")
-                    btn_delete_h = col_bh2.form_submit_button("🗑️ Eliminar Registro")
-                    
-                    if btn_save_h:
-                        usr_act = st.session_state.get("usuario", "")
-                        if not verificar_password_usuario(usr_act, pass_hidro):
-                            st.error("🔒 Contraseña incorrecta o no ingresada. No se guardaron los cambios.")
-                        else:
-                            cambios_h = []
-                            if str(row_h['Fecha']) != edit_fecha_h.strftime("%Y-%m-%d"):
-                                cambios_h.append(f"Fecha: '{row_h['Fecha']}' -> '{edit_fecha_h.strftime('%Y-%m-%d')}'")
-                            if str(row_h['Producto']) != str(edit_prod_h):
-                                cambios_h.append(f"Producto: '{row_h['Producto']}' -> '{edit_prod_h}'")
-                            if str(row_h['Movimiento']) != str(edit_mov_h):
-                                cambios_h.append(f"Movimiento: '{row_h['Movimiento']}' -> '{edit_mov_h}'")
-                            if float(row_h['Cantidad']) != float(edit_cant_h):
-                                cambios_h.append(f"Cantidad: {row_h['Cantidad']} -> {edit_cant_h}")
-                            if str(row_h['Destino']) != str(edit_dest_h):
-                                cambios_h.append(f"Destino: '{row_h['Destino']}' -> '{edit_dest_h}'")
-                            if str(row_h['Operario']) != str(edit_oper_h):
-                                cambios_h.append(f"Responsable: '{row_h['Operario']}' -> '{edit_oper_h}'")
-                            
-                            log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            usr_str = usr_act if usr_act else "Usuario"
-                            detalle_c = ", ".join(cambios_h) if cambios_h else "Sin cambios"
-                            nuevo_log = f"{log_fecha} - Modificado por usuario {usr_str}: {detalle_c}"
-                            hist_act = str(row_h.get('HistorialModificaciones', '')) if pd.notna(row_h.get('HistorialModificaciones')) else ""
-                            nuevo_hist = (hist_act + "\n" + nuevo_log).strip()
-
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("""
-                            UPDATE hidrocarburos SET
-                                Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?, HistorialModificaciones = ?
-                            WHERE id = ?
-                            """, (edit_fecha_h.strftime("%Y-%m-%d"), edit_prod_h, edit_mov_h, edit_cant_h, edit_dest_h, edit_oper_h, nuevo_hist, db_id_h))
-                            conn.commit()
-                            conn.close()
-                            st.success("¡Registro de hidrocarburos actualizado con éxito!")
-                            st.rerun()
-                            
-                    if btn_delete_h:
-                        usr_act = st.session_state.get("usuario", "")
-                        if not verificar_password_usuario(usr_act, pass_hidro):
-                            st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
-                        else:
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM hidrocarburos WHERE id = ?", (db_id_h,))
-                            conn.commit()
-                            conn.close()
-                            st.success("¡Registro de hidrocarburos eliminado con éxito!")
-                            st.rerun()
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                        UPDATE hidrocarburos SET
+                            Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?, HistorialModificaciones = ?
+                        WHERE id = ?
+                        """, (edit_fecha_h.strftime("%Y-%m-%d"), edit_prod_h, edit_mov_h, edit_cant_h, edit_dest_h, edit_oper_h, nuevo_hist, db_id_h))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro de hidrocarburos actualizado con éxito!")
+                        st.rerun()
+                        
+                if btn_delete_h:
+                    usr_act = st.session_state.get("usuario", "")
+                    if not verificar_password_usuario(usr_act, pass_hidro):
+                        st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM hidrocarburos WHERE id = ?", (db_id_h,))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Registro de hidrocarburos eliminado con éxito!")
+                        st.rerun()
 
 # --- 8. DATOS MAESTROS & GESTIÓN QR ---
 elif menu == "⚙️ Datos Maestros & Gestión QR":
