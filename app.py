@@ -22,14 +22,14 @@ st.markdown("""
         color: #f1f5f9 !important;
     }
 
-    /* Reducir espacio en blanco superior de Streamlit manteniendo margen para el header flotante */
+    /* Asegurar margen superior suficiente para que la barra flotante de Streamlit jamás tape los títulos */
     [data-testid="stAppViewContainer"] > .main {
-        padding-top: 2.6rem !important;
+        padding-top: 0rem !important;
         padding-bottom: 1.5rem !important;
     }
     
     .block-container {
-        padding-top: 1.2rem !important;
+        padding-top: 4.5rem !important;
         padding-bottom: 1.5rem !important;
         max-width: 96% !important;
     }
