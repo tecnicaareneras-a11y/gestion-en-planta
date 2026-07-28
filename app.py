@@ -10,7 +10,7 @@ import urllib.parse
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Gestión de Planta", layout="wide")
 
-# --- INYECCIÓN DE ESTILOS CSS PERSONALIZADOS (DISEÑO FRACTTAL ONE) ---
+# --- INYECCIÓN DE ESTILOS CSS PERSONALIZADOS (DISEÑO FRACTTAL ONE COMPACTO) ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
@@ -21,25 +21,56 @@ st.markdown("""
         background-color: #0b0f19 !important;
         color: #f1f5f9 !important;
     }
+
+    /* Reducir espacio en blanco superior gigantesco de Streamlit */
+    [data-testid="stAppViewContainer"] > .main {
+        padding-top: 1.2rem !important;
+        padding-bottom: 1.5rem !important;
+    }
     
-    /* Aplicar a elementos de texto específicos */
+    .block-container {
+        padding-top: 0.8rem !important;
+        padding-bottom: 1.5rem !important;
+        max-width: 96% !important;
+    }
+    
+    /* Aplicar a elementos de texto específicos y subir títulos */
     h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, .stMetric, button div, div[role="radiogroup"] label {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
     }
 
-    /* Header superior Fracttal style */
+    h1 {
+        font-size: 22px !important;
+        margin-top: 0px !important;
+        margin-bottom: 6px !important;
+        padding-top: 0px !important;
+    }
+    
+    h2 {
+        font-size: 18px !important;
+        margin-top: 0px !important;
+        margin-bottom: 6px !important;
+    }
+    
+    h3 {
+        font-size: 15.5px !important;
+        margin-top: 0px !important;
+        margin-bottom: 4px !important;
+    }
+
+    /* Header superior Fracttal style compacto */
     .fracttal-header {
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
         border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 18px 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        border-radius: 10px;
+        padding: 12px 18px !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
     }
     
     .fracttal-title {
         color: #ffffff;
-        font-size: 22px;
+        font-size: 19px !important;
         font-weight: 700;
         letter-spacing: -0.5px;
         margin: 0;
@@ -47,27 +78,31 @@ st.markdown("""
     
     .fracttal-subtitle {
         color: #94a3b8;
-        font-size: 13px;
-        margin-top: 4px;
+        font-size: 12px !important;
+        margin-top: 2px;
     }
     
-    /* Estilos del Sidebar (Menú Lateral Fracttal) */
+    /* Estilos del Sidebar (Menú Lateral Fracttal Compacto) */
     [data-testid="stSidebar"] {
         background-color: #0f172a !important;
         border-right: 1px solid #1e293b !important;
+    }
+
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 1rem !important;
     }
     
     [data-testid="stSidebar"] h1 {
         color: #ffffff !important;
         font-weight: 700 !important;
         letter-spacing: 0.5px !important;
-        font-size: 20px !important;
+        font-size: 18px !important;
     }
     
     /* Ajustes del Radio Group en Sidebar (Navegación tipo Botón Fracttal) */
     div[data-testid="stSidebar"] div[role="radiogroup"] {
-        gap: 6px !important;
-        padding-top: 8px !important;
+        gap: 4px !important;
+        padding-top: 4px !important;
     }
     
     /* Quitar el círculo de selección por defecto */
@@ -79,12 +114,12 @@ st.markdown("""
     div[data-testid="stSidebar"] div[role="radiogroup"] label {
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
-        border-radius: 10px !important;
-        padding: 10px 14px !important;
+        border-radius: 8px !important;
+        padding: 7px 12px !important;
         transition: all 0.2s ease-in-out !important;
         cursor: pointer !important;
         width: 100% !important;
-        margin-bottom: 2px !important;
+        margin-bottom: 1px !important;
         display: flex !important;
         align-items: center !important;
     }
@@ -93,7 +128,7 @@ st.markdown("""
     div[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
         background-color: #334155 !important;
         border-color: #10b981 !important;
-        transform: translateX(4px) !important;
+        transform: translateX(3px) !important;
     }
     
     /* Opción seleccionada Sidebar (Acento Esmeralda Fracttal) */
@@ -102,12 +137,12 @@ st.markdown("""
         border-color: #10b981 !important;
         color: #ffffff !important;
         font-weight: 600 !important;
-        box-shadow: 0px 4px 15px rgba(16, 185, 129, 0.25) !important;
+        box-shadow: 0px 4px 12px rgba(16, 185, 129, 0.25) !important;
     }
     
     /* Texto del menú */
     div[data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
-        font-size: 13.5px !important;
+        font-size: 12.5px !important;
         color: #e2e8f0 !important;
         margin: 0 !important;
     }
@@ -116,31 +151,34 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Tarjetas Métricas Fracttal */
+    /* Tarjetas Métricas Fracttal Compactas */
     div[data-testid="metric-container"] {
         background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%) !important;
         border: 1px solid #334155 !important;
         border-top: 3px solid #10b981 !important;
-        border-radius: 12px !important;
-        padding: 16px 20px !important;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
-        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+        border-radius: 10px !important;
+        padding: 10px 14px !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
     }
 
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.15) !important;
+    div[data-testid="stMetricValue"] {
+        font-size: 19px !important;
+        font-weight: 700 !important;
     }
 
-    /* Badges de Estado Fracttal */
+    div[data-testid="stMetricLabel"] {
+        font-size: 12px !important;
+    }
+
+    /* Badges de Estado Fracttal Compactos */
     .badge-operativo {
         background-color: rgba(16, 185, 129, 0.15);
         color: #34d399;
         border: 1px solid #059669;
-        padding: 4px 10px;
+        padding: 3px 8px;
         border-radius: 20px;
         font-weight: 600;
-        font-size: 12px;
+        font-size: 11px;
         display: inline-block;
     }
     
@@ -148,10 +186,10 @@ st.markdown("""
         background-color: rgba(245, 158, 11, 0.15);
         color: #fbbf24;
         border: 1px solid #d97706;
-        padding: 4px 10px;
+        padding: 3px 8px;
         border-radius: 20px;
         font-weight: 600;
-        font-size: 12px;
+        font-size: 11px;
         display: inline-block;
     }
 
@@ -159,10 +197,10 @@ st.markdown("""
         background-color: rgba(239, 68, 68, 0.15);
         color: #f87171;
         border: 1px solid #dc2626;
-        padding: 4px 10px;
+        padding: 3px 8px;
         border-radius: 20px;
         font-weight: 600;
-        font-size: 12px;
+        font-size: 11px;
         display: inline-block;
     }
 
@@ -171,16 +209,16 @@ st.markdown("""
         background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
         color: #ffffff !important;
         border: none !important;
-        border-radius: 8px !important;
+        border-radius: 6px !important;
         font-weight: 600 !important;
-        padding: 8px 16px !important;
+        padding: 6px 12px !important;
+        font-size: 13px !important;
         transition: all 0.2s ease !important;
     }
 
     .stButton > button:hover, div[stFormSubmitButton] > button:hover {
         background: linear-gradient(135deg, #047857 0%, #059669 100%) !important;
-        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3) !important;
-        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
     }
 </style>
 """, unsafe_allow_html=True)
