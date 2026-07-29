@@ -117,13 +117,15 @@ st.markdown("""
         padding-left: 4px !important;
     }
     
-    /* Quitar el círculo de selección por defecto (cualquier div directo que NO sea la etiqueta de texto) */
-    [data-testid="stSidebar"] div[role="radiogroup"] label > div:not([data-testid="stMarkdownContainer"]) {
+    /* Quitar el círculo de selección por defecto sin ocultar el texto (usando exclusión de contenedor de texto) */
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div:not([data-testid="stMarkdownContainer"]):not(:has([data-testid="stMarkdownContainer"])),
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div > div:not([data-testid="stMarkdownContainer"]):not(:has([data-testid="stMarkdownContainer"])) {
         display: none !important;
     }
     
-    /* Asegurar que la etiqueta de texto sea visible y tenga flex layout */
-    [data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] {
+    /* Asegurar que la etiqueta de texto y su párrafo sean siempre visibles */
+    [data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"],
+    [data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
         display: block !important;
     }
     
