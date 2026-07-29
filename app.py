@@ -564,7 +564,8 @@ def init_db():
         Password TEXT,
         Token TEXT,
         Rol TEXT,
-        Puesto TEXT
+        Puesto TEXT,
+        Nombre TEXT
     )
     """)
     
@@ -573,8 +574,8 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         import uuid
         default_token = uuid.uuid4().hex
-        cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto) VALUES (?, ?, ?, ?, ?)",
-                       ("admin", "admin", default_token, "Administrador", "Administrador del Sistema"))
+        cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto, Nombre) VALUES (?, ?, ?, ?, ?, ?)",
+                       ("admin", "admin", default_token, "Administrador", "Administrador del Sistema", "Administrador Principal"))
         conn.commit()
 
     # Asegurar que existan los 5 equipos base en el catálogo de máquinas
@@ -582,11 +583,16 @@ def init_db():
         cursor.execute("INSERT OR IGNORE INTO maquinas (Nombre) VALUES (?)", (maq,))
     conn.commit()
 
-    # Asegurar que exista la columna Puesto en usuarios si la tabla ya existe
+    # Asegurar que existan las columnas necesarias en usuarios si la tabla ya existe
     cursor.execute("PRAGMA table_info(usuarios)")
     columnas_usr = [row[1] for row in cursor.fetchall()]
     if "Puesto" not in columnas_usr:
         cursor.execute("ALTER TABLE usuarios ADD COLUMN Puesto TEXT")
+    if "Nombre" not in columnas_usr:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN Nombre TEXT")
+        # Sincronizar Nombre con Usuario para usuarios existentes para no perder los datos reales
+        cursor.execute("UPDATE usuarios SET Nombre = Usuario")
+        conn.commit()
     
     # Asegurar que existan las nuevas columnas en mantenimientos si ya existe la tabla
     cursor.execute("PRAGMA table_info(mantenimientos)")
@@ -758,7 +764,7 @@ tkn_cookie = cookies_dict.get("planta_tkn")
 if not st.session_state["usuario"] and usr_cookie and tkn_cookie:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT Usuario, Rol, Puesto FROM usuarios WHERE Usuario = ? AND Token = ?", (usr_cookie, tkn_cookie))
+    cursor.execute("SELECT Usuario, Rol, Puesto, Nombre FROM usuarios WHERE Usuario = ? AND Token = ?", (usr_cookie, tkn_cookie))
     match = cursor.fetchone()
     conn.close()
     if match:
@@ -766,6 +772,7 @@ if not st.session_state["usuario"] and usr_cookie and tkn_cookie:
         st.session_state["token"] = tkn_cookie
         st.session_state["rol"] = match[1]
         st.session_state["puesto"] = match[2]
+        st.session_state["nombre_completo"] = match[3] if match[3] else match[0]
 
 # B. Leer parámetros de query (si no se pudo validar por cookies directamente)
 if not st.session_state["usuario"]:
@@ -775,7 +782,7 @@ if not st.session_state["usuario"]:
         t_param = q_params["tkn"]
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT Usuario, Rol, Puesto FROM usuarios WHERE Usuario = ? AND Token = ?", (u_param, t_param))
+        cursor.execute("SELECT Usuario, Rol, Puesto, Nombre FROM usuarios WHERE Usuario = ? AND Token = ?", (u_param, t_param))
         match = cursor.fetchone()
         conn.close()
         if match:
@@ -783,6 +790,7 @@ if not st.session_state["usuario"]:
             st.session_state["token"] = t_param
             st.session_state["rol"] = match[1]
             st.session_state["puesto"] = match[2]
+            st.session_state["nombre_completo"] = match[3] if match[3] else match[0]
             # Guardar tanto en cookies como en localStorage para redundancia absoluta (codificado para soportar espacios/acentos)
             import time
             rand_t = time.time()
@@ -802,13 +810,14 @@ if not st.session_state["usuario"]:
 if st.session_state["usuario"] and (not st.session_state["token"] or "rol" not in st.session_state or not st.session_state["rol"]):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT Token, Rol, Puesto FROM usuarios WHERE Usuario = ?", (st.session_state["usuario"],))
+    cursor.execute("SELECT Token, Rol, Puesto, Nombre FROM usuarios WHERE Usuario = ?", (st.session_state["usuario"],))
     row = cursor.fetchone()
     conn.close()
     if row:
         st.session_state["token"] = row[0]
         st.session_state["rol"] = row[1]
         st.session_state["puesto"] = row[2]
+        st.session_state["nombre_completo"] = row[3] if row[3] else st.session_state["usuario"]
 
 # D. Si no hay sesión activa (no se detectó cookie ni query param), verificar en localStorage
 if not st.session_state["usuario"]:
@@ -851,7 +860,7 @@ if not st.session_state["usuario"]:
                 else:
                     conn = get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("SELECT Token, Rol, Puesto FROM usuarios WHERE Usuario = ? AND Password = ?", (u_input.strip(), p_input.strip()))
+                    cursor.execute("SELECT Token, Rol, Puesto, Nombre FROM usuarios WHERE Usuario = ? AND Password = ?", (u_input.strip(), p_input.strip()))
                     row = cursor.fetchone()
                     conn.close()
                     
@@ -859,10 +868,12 @@ if not st.session_state["usuario"]:
                         token = row[0]
                         rol = row[1]
                         puesto = row[2]
+                        nombre = row[3]
                         st.session_state["token"] = token
                         st.session_state["usuario"] = u_input.strip()
                         st.session_state["rol"] = rol
                         st.session_state["puesto"] = puesto
+                        st.session_state["nombre_completo"] = nombre if nombre else u_input.strip()
                         st.success("¡Inicio de sesión exitoso! Redireccionando...")
                         # Redireccionar de forma nativa en Python sin requerir ejecución JS en el form submit
                         st.query_params["usr"] = u_input.strip()
@@ -1150,7 +1161,7 @@ def mostrar_registro_rapido_qr(maquina_qr):
     tab_mant_qr, tab_chk_qr = st.tabs(["🔧 Registrar Mantenimiento", "📋 Control Diario (Check-List)"])
     
     empleados_list_db = cargar_lista_columna("empleados", "Nombre")
-    usuario_logueado = st.session_state.get("usuario", "")
+    usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
     indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
         
     with tab_mant_qr:
@@ -1218,7 +1229,7 @@ def mostrar_registro_rapido_qr(maquina_qr):
                     cursor.execute("""
                     INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (fecha_actividad, maquina_qr, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("usuario")))
+                    """, (fecha_actividad, maquina_qr, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
                     conn.commit()
                     conn.close()
                     
@@ -1239,7 +1250,7 @@ def mostrar_checklist_diario_qr(maquina_qr, titulo_vis=True):
     empleados_list_db = cargar_lista_columna("empleados", "Nombre")
     
     # Intentar pre-seleccionar el usuario logueado si coincide con algún empleado en base de datos (con búsqueda tolerante a acentos/casing)
-    usuario_logueado = st.session_state.get("usuario", "")
+    usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
     indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
         
     with st.form("form_checklist_qr"):
@@ -1296,7 +1307,7 @@ def mostrar_checklist_diario_qr(maquina_qr, titulo_vis=True):
                     ii_a, ii_b, ii_c,
                     iii_a, iii_b,
                     iv_a, iv_b,
-                    observaciones, st.session_state.get("usuario")
+                    observaciones, st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 ))
                 conn.commit()
                 conn.close()
@@ -1314,7 +1325,7 @@ def mostrar_registro_hidro_qr(prod_pre=None):
     maquinas_list_db = cargar_lista_columna("maquinas", "Nombre")
     hidro_list_db = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
     
-    usuario_logueado = st.session_state.get("usuario", "")
+    usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
     indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
     
     idx_prod = None
@@ -1343,7 +1354,7 @@ def mostrar_registro_hidro_qr(prod_pre=None):
                 conn = get_connection()
                 cursor = conn.cursor()
                 fecha_creacion_hd = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                usr_hd = st.session_state.get("usuario", "Desconocido")
+                usr_hd = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 hist_hd = f"{fecha_creacion_hd} - Registrado por usuario: {usr_hd} (Vía QR)"
                 cursor.execute("""
                 INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
@@ -1413,7 +1424,8 @@ else:
 menu = st.sidebar.radio("Menú:", opciones_menu)
 
 st.sidebar.divider()
-st.sidebar.write(f"👤 Sesión: **{st.session_state['usuario']}**")
+nombre_mostrado = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
+st.sidebar.write(f"👤 Sesión: **{nombre_mostrado}**")
 if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
     st.session_state["usuario"] = None
     st.session_state["token"] = None
@@ -1687,7 +1699,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                 fecha_inicio = c1.date_input("Fecha Inicio", datetime.now(), format="DD/MM/YYYY")
                 fecha_fin = c2.date_input("Fecha Finalización", value=fecha_inicio, format="DD/MM/YYYY")
                 
-                usuario_logueado = st.session_state.get("usuario", "")
+                usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
                 indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
                     
                 maquina = c1.selectbox("Máquina Intervenida", maquinas_list, index=None, placeholder="Escribe para buscar máquina...")
@@ -1747,7 +1759,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                         cursor.execute("""
                         INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (fecha_inicio.strftime("%Y-%m-%d"), maquina, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("usuario")))
+                        """, (fecha_inicio.strftime("%Y-%m-%d"), maquina, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
                         conn.commit()
                         conn.close()
                         st.success("¡Mantenimiento guardado!")
@@ -1784,7 +1796,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
             with st.form("form_checklist_pc"):
                 c1, c2 = st.columns(2)
                 fecha = c1.date_input("Fecha", datetime.now(), format="DD/MM/YYYY")
-                usuario_logueado = st.session_state.get("usuario", "")
+                usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
                 indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
                 
                 # Desplegar la máquina activa no editable dentro del formulario
@@ -1841,7 +1853,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                             ii_a, ii_b, ii_c,
                             iii_a, iii_b,
                             iv_a, iv_b,
-                            observaciones, st.session_state.get("usuario")
+                            observaciones, st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                         ))
                         conn.commit()
                         conn.close()
@@ -2193,7 +2205,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                     cursor.execute("""
                                     INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (fecha_hoy, row['Maquina'], tech_realizo, "Preventivo" if "Preventivo" in tipo_val else "Correctivo", "08:00", "1.0 hs", float(row['Horimetro_Est']) if pd.notna(row['Horimetro_Est']) else 0.0, det_auto, "Depósito Baigorria", fecha_c, "Ejecutado desde Planificación PCM.", st.session_state.get("usuario")))
+                                    """, (fecha_hoy, row['Maquina'], tech_realizo, "Preventivo" if "Preventivo" in tipo_val else "Correctivo", "08:00", "1.0 hs", float(row['Horimetro_Est']) if pd.notna(row['Horimetro_Est']) else 0.0, det_auto, "Depósito Baigorria", fecha_c, "Ejecutado desde Planificación PCM.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
                                     conn.commit()
                                     conn.close()
                                     st.success("¡OT completada y registrada en el historial!")
@@ -2279,7 +2291,7 @@ elif menu == "📦 Gestión de Repuestos e Insumos":
                 conn = get_connection()
                 cursor = conn.cursor()
                 fecha_creacion_stk = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                usr_stk = st.session_state.get("usuario", "Desconocido")
+                usr_stk = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 hist_stk = f"{fecha_creacion_stk} - Registrado por usuario: {usr_stk}"
                 cursor.execute("""
                 INSERT INTO stock (Fecha, Producto, Movimiento, Cantidad, Destino, FechaCreacion, HistorialModificaciones, CreadoPor)
@@ -2474,7 +2486,9 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
         prod_h = c1.selectbox("Tipo", hidro_list, index=None, placeholder="Escribe para buscar tipo...")
         cant_h = c2.number_input("Litros", min_value=0.0)
         dest_h = c2.selectbox("Destino", ["Stock Central"] + maquinas_list, index=None, placeholder="Escribe para buscar destino...")
-        oper_h = st.selectbox("Responsable", empleados_list, index=None, placeholder="Escribe para buscar responsable...")
+        usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
+        indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
+        oper_h = st.selectbox("Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar responsable...")
         if st.form_submit_button("Cargar Registro"):
             if not prod_h:
                 st.error("⚠️ Por favor selecciona el tipo de hidrocarburo.")
@@ -2486,7 +2500,7 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
                 conn = get_connection()
                 cursor = conn.cursor()
                 fecha_creacion_hd = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                usr_hd = st.session_state.get("usuario", "Desconocido")
+                usr_hd = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 hist_hd = f"{fecha_creacion_hd} - Registrado por usuario: {usr_hd}"
                 cursor.execute("""
                 INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
@@ -2711,7 +2725,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             ingresos=ingresos_periodo,
             egresos=egresos_periodo,
             balance=balance_periodo,
-            usuario_emisor=st.session_state.get("usuario", "")
+            usuario_emisor=st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
         )
         
         c_exp2.download_button(
@@ -2903,15 +2917,16 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 
                 st.subheader("➕ Crear Nuevo Usuario")
                 with st.form("form_nuevo_usuario"):
-                    nuevo_u = st.text_input("Usuario / Técnico responsable")
+                    nuevo_nom = st.text_input("Nombre y Apellido", placeholder="Ej: Diego Gazquez")
+                    nuevo_u = st.text_input("Usuario (rápido de recordar y tipear)", placeholder="Ej: dgazquez")
                     nuevo_p = st.text_input("Contraseña de Carga", type="password")
                     nuevo_rj = st.text_input("Puesto de Trabajo (Planta y función en la empresa)", placeholder="Ej: Planta San Lorenzo - Mecánico")
                     nuevo_r = st.selectbox("Rol de Acceso", ["Operario", "Administrador"])
                     
                     guardar_u = st.form_submit_button("💾 Guardar Nuevo Usuario")
                     if guardar_u:
-                        if not nuevo_u.strip() or not nuevo_p.strip():
-                            st.error("⚠️ Por favor completa el usuario y la contraseña.")
+                        if not nuevo_nom.strip() or not nuevo_u.strip() or not nuevo_p.strip():
+                            st.error("⚠️ Por favor completa el nombre, el usuario y la contraseña.")
                         else:
                             import uuid
                             token_u = uuid.uuid4().hex
@@ -2921,10 +2936,10 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                             conn = sqlite3.connect("gestion_planta.db")
                             cursor = conn.cursor()
                             try:
-                                cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto) VALUES (?, ?, ?, ?, ?)",
-                                               (nuevo_u.strip(), nuevo_p.strip(), token_u, nuevo_r, nuevo_rj.strip()))
+                                cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto, Nombre) VALUES (?, ?, ?, ?, ?, ?)",
+                                               (nuevo_u.strip(), nuevo_p.strip(), token_u, nuevo_r, nuevo_rj.strip(), nuevo_nom.strip()))
                                 conn.commit()
-                                st.success(f"🎉 Usuario '{nuevo_u}' registrado correctamente.")
+                                st.success(f"🎉 Usuario '{nuevo_nom.strip()}' ('{nuevo_u.strip()}') registrado correctamente.")
                             except sqlite3.IntegrityError:
                                 st.error("⚠️ Ese nombre de usuario ya existe.")
                             finally:
@@ -2936,13 +2951,13 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 import sqlite3
                 conn = sqlite3.connect("gestion_planta.db")
                 import pandas as pd
-                df_users = pd.read_sql_query("SELECT Usuario, Rol, Password, Puesto FROM usuarios", conn)
+                df_users = pd.read_sql_query("SELECT Usuario, Nombre, Rol, Password, Puesto FROM usuarios", conn)
                 conn.close()
                 
                 if df_users.empty:
                     st.info("No hay usuarios registrados.")
                 else:
-                    st.dataframe(df_users[["Usuario", "Rol", "Puesto"]], use_container_width=True, hide_index=True)
+                    st.dataframe(df_users[["Nombre", "Usuario", "Rol", "Puesto"]], use_container_width=True, hide_index=True)
                     
                     # Sección: Editar Usuario
                     st.divider()
@@ -2953,17 +2968,19 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         current_rol = user_row["Rol"]
                         current_pass = user_row["Password"]
                         current_puesto = user_row["Puesto"] if pd.notna(user_row["Puesto"]) else ""
+                        current_nombre = user_row["Nombre"] if pd.notna(user_row["Nombre"]) else ""
                         
                         with st.form("form_editar_usuario"):
-                            edit_u = st.text_input("Nombre de Usuario / Nombre de Técnico", value=u_a_editar)
+                            edit_nom = st.text_input("Nombre y Apellido", value=current_nombre)
+                            edit_u = st.text_input("Usuario", value=u_a_editar)
                             edit_p = st.text_input("Contraseña de Carga", value=current_pass, type="password")
                             edit_rj = st.text_input("Puesto de Trabajo", value=current_puesto)
                             edit_r = st.selectbox("Rol de Acceso", ["Operario", "Administrador"], index=0 if current_rol == "Operario" else 1)
                             
                             guardar_cambios = st.form_submit_button("💾 Guardar Cambios")
                             if guardar_cambios:
-                                if not edit_u.strip() or not edit_p.strip():
-                                    st.error("⚠️ Por favor completa el usuario y la contraseña.")
+                                if not edit_nom.strip() or not edit_u.strip() or not edit_p.strip():
+                                    st.error("⚠️ Por favor completa el nombre, el usuario y la contraseña.")
                                 else:
                                     conn = sqlite3.connect("gestion_planta.db")
                                     cursor = conn.cursor()
@@ -2974,9 +2991,9 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                                         else:
                                             cursor.execute("""
                                             UPDATE usuarios SET
-                                                Usuario = ?, Password = ?, Rol = ?, Puesto = ?
+                                                Usuario = ?, Nombre = ?, Password = ?, Rol = ?, Puesto = ?
                                             WHERE Usuario = ?
-                                            """, (edit_u.strip(), edit_p.strip(), edit_r, edit_rj.strip(), u_a_editar))
+                                            """, (edit_u.strip(), edit_nom.strip(), edit_p.strip(), edit_r, edit_rj.strip(), u_a_editar))
                                             conn.commit()
                                             st.success(f"🎉 Cambios guardados para el usuario '{edit_u.strip()}'.")
                                             st.rerun()
