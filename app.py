@@ -117,11 +117,14 @@ st.markdown("""
         padding-left: 4px !important;
     }
     
-    /* Quitar el círculo de selección por defecto */
-    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child,
-    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-of-type,
-    [data-testid="stSidebar"] div[role="radiogroup"] label input[type="radio"] + div {
+    /* Quitar el círculo de selección por defecto (cualquier div directo que NO sea la etiqueta de texto) */
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div:not([data-testid="stMarkdownContainer"]) {
         display: none !important;
+    }
+    
+    /* Asegurar que la etiqueta de texto sea visible y tenga flex layout */
+    [data-testid="stSidebar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] {
+        display: block !important;
     }
     
     /* Estilo del botón del menú lateral */
