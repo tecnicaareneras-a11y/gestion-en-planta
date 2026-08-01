@@ -11,8 +11,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 CREDENTIALS_PATH = os.path.join(BASE_DIR, "gdrive_credentials.json")
 
-# Cargar el FILE_ID dinámicamente
-FILE_ID = None
+# Cargar el FILE_ID dinámicamente con un fallback por defecto
+FILE_ID = "1UfzkGGdVEBfOLlbG-3QQnKgl74Yl4Fj5"
 
 # 1. Intentar cargar desde st.secrets (Nube)
 try:
@@ -23,13 +23,14 @@ except:
     pass
 
 # 2. Si no, intentar cargar desde gdrive_config.json local
-if not FILE_ID:
+if FILE_ID == "1UfzkGGdVEBfOLlbG-3QQnKgl74Yl4Fj5" or not FILE_ID:
     config_path = os.path.join(BASE_DIR, "gdrive_config.json")
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 config_data = json.load(f)
-                FILE_ID = config_data.get("file_id")
+                if config_data.get("file_id"):
+                    FILE_ID = config_data.get("file_id")
         except Exception as e:
             print(f"Error cargando gdrive_config.json: {e}")
 
