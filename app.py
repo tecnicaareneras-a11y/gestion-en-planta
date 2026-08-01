@@ -434,7 +434,7 @@ def buscar_coincidencia_empleado(usuario, lista_empleados):
         
     return None
 
-DB_FILE = "gestion_planta.db"
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gestion_planta.db")
 
 # --- CONEXIÓN Y CREACIÓN DE TABLAS SQLITE ---
 def get_connection():
@@ -2978,8 +2978,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                             token_u = uuid.uuid4().hex
                             
                             # Conectar e insertar
-                            import sqlite3
-                            conn = sqlite3.connect("gestion_planta.db")
+                            conn = get_connection()
                             cursor = conn.cursor()
                             try:
                                 cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto, Nombre) VALUES (?, ?, ?, ?, ?, ?)",
@@ -2994,8 +2993,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 
                 st.divider()
                 st.subheader("👥 Usuarios del Sistema")
-                import sqlite3
-                conn = sqlite3.connect("gestion_planta.db")
+                conn = get_connection()
                 import pandas as pd
                 df_users = pd.read_sql_query("SELECT Usuario, Nombre, Rol, Password, Puesto FROM usuarios", conn)
                 conn.close()
@@ -3028,7 +3026,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                                 if not edit_nom.strip() or not edit_u.strip() or not edit_p.strip():
                                     st.error("⚠️ Por favor completa el nombre, el usuario y la contraseña.")
                                 else:
-                                    conn = sqlite3.connect("gestion_planta.db")
+                                    conn = get_connection()
                                     cursor = conn.cursor()
                                     try:
                                         # Prohibir cambiar el nombre del admin por defecto
@@ -3057,7 +3055,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                             if u_a_borrar == "admin":
                                 st.error("⚠️ No se puede eliminar el usuario administrador principal ('admin').")
                             else:
-                                conn = sqlite3.connect("gestion_planta.db")
+                                conn = get_connection()
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM usuarios WHERE Usuario = ?", (u_a_borrar,))
                                 guardar_cambios_db(conn)
