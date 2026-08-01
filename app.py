@@ -1427,9 +1427,15 @@ st.sidebar.title("🛠️ GESTIÓN TÉCNICA")
 user_role = st.session_state.get("rol", "Operario")
 if user_role == "Operario":
     opciones_menu = [
+        "🏠 Inicio - Tablero General",
         "🔧 Registro de Intervenciones (OT)",
+        "📋 Reporte Mant. Realizado",
+        "📦 Gestión de Repuestos e Insumos",
+        "📋 Reporte Movimientos Stock",
         "⛽ Gestión de Combustibles & Lubricantes",
-        "📦 Gestión de Repuestos e Insumos"
+        "📋 Balances & Reportes de Hidrocarburos",
+        "📅 Programación & Plan de Mantenimiento (PCM)",
+        "📥 Exportación Global de Datos"
     ]
 else:
     opciones_menu = [
