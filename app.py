@@ -441,6 +441,15 @@ def get_connection():
     # timeout=20.0 evita errores de bloqueo en escrituras concurrentes
     return sqlite3.connect(DB_FILE, timeout=20.0)
 
+def guardar_cambios_db(conn):
+    conn.commit()
+    conn.close()
+    try:
+        import gdrive_sync
+        gdrive_sync.subir_db_a_gdrive()
+    except Exception as e:
+        print(f"Error sincronizando con Google Drive: {e}")
+
 def verificar_password_usuario(usuario_actual, password_ingresado):
     if not password_ingresado or not str(password_ingresado).strip():
         return False
@@ -703,6 +712,27 @@ def init_db():
     if migrated:
         conn.commit()
     conn.close()
+
+# --- DESCARGAR BASE DE DATOS DE GOOGLE DRIVE AL INICIAR ---
+@st.cache_resource
+def descargar_db_inicial():
+    try:
+        import gdrive_sync
+        success = gdrive_sync.descargar_db_desde_gdrive()
+        return {
+            "status": "OK" if success else "Error",
+            "download_time": datetime.now().strftime("%d/%m/%Y %H:%M:%S") if success else None,
+            "error": gdrive_sync.LAST_SYNC["error"] if not success else None
+        }
+    except Exception as e:
+        return {
+            "status": "Error",
+            "download_time": None,
+            "error": str(e)
+        }
+
+# Descargar base de datos antes de inicializarla/migrarla
+descargar_db_inicial()
 
 # Inicializar Base de Datos al arrancar la app y migrar datos antiguos
 init_db()
@@ -1044,8 +1074,7 @@ def mostrar_detalle_independiente(detail_id):
                                 Fecha = ?, Deposito = ?, Maquina = ?, Operario = ?, Tipo = ?, Inicio = ?, Fin = ?, Horimetro = ?, Detalle = ?, HistorialModificaciones = ?
                             WHERE id = ?
                             """, (fecha_edit.strftime("%Y-%m-%d"), deposito_edit, maquina_edit, operario_edit, tipo_edit, inicio_edit, fin_edit, horimetro_edit, detalle_edit, nuevo_historial, detail_id))
-                            conn.commit()
-                            conn.close()
+                            guardar_cambios_db(conn)
                             st.success("¡El registro se actualizó y se guardó en el historial!")
                             st.session_state["edit_ficha_activa"] = False
                             st.rerun()
@@ -1059,8 +1088,7 @@ def mostrar_detalle_independiente(detail_id):
                         conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM mantenimientos WHERE id = ?", (detail_id,))
-                        conn.commit()
-                        conn.close()
+                        guardar_cambios_db(conn)
                         st.success("¡Registro eliminado con éxito!")
                         st.query_params.clear()
                         st.rerun()
@@ -1146,8 +1174,7 @@ def mostrar_ficha_checklist_independiente(chk_id):
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM controles_diarios WHERE id = ?", (chk_id,))
-            conn.commit()
-            conn.close()
+            guardar_cambios_db(conn)
             st.success("¡Control Diario eliminado con éxito!")
             st.query_params.clear()
             st.rerun()
@@ -1230,8 +1257,7 @@ def mostrar_registro_rapido_qr(maquina_qr):
                     INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (fecha_actividad, maquina_qr, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde dispositivo móvil usando Código QR.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
-                    conn.commit()
-                    conn.close()
+                    guardar_cambios_db(conn)
                     
                     st.success("🎉 ¡Mantenimiento registrado con éxito!")
                     st.balloons()
@@ -1309,8 +1335,7 @@ def mostrar_checklist_diario_qr(maquina_qr, titulo_vis=True):
                     iv_a, iv_b,
                     observaciones, st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 ))
-                conn.commit()
-                conn.close()
+                guardar_cambios_db(conn)
                 
                 st.success("🎉 ¡Control Diario guardado con éxito!")
                 st.balloons()
@@ -1360,8 +1385,7 @@ def mostrar_registro_hidro_qr(prod_pre=None):
                 INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (datetime.now().strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd))
-                conn.commit()
-                conn.close()
+                guardar_cambios_db(conn)
                 st.success("🎉 ¡Registro de Hidrocarburos guardado con éxito!")
                 st.balloons()
                 st.info("Ya puede continuar cargando o cerrar la ventana en su teléfono.")
@@ -1426,7 +1450,39 @@ menu = st.sidebar.radio("Menú:", opciones_menu)
 st.sidebar.divider()
 nombre_mostrado = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
 st.sidebar.write(f"👤 Sesión: **{nombre_mostrado}**")
-if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
+
+# --- INDICADOR DE SINCRONIZACIÓN DE GOOGLE DRIVE ---
+try:
+    import gdrive_sync
+    sync_info = descargar_db_inicial()
+    upload_info = gdrive_sync.LAST_SYNC
+    with st.sidebar.expander("☁️ Estado de Nube Google Drive", expanded=True):
+        if sync_info["status"] == "OK":
+            st.success("Conectado con Google Drive")
+            if sync_info["download_time"]:
+                st.caption(f"Descargado al arrancar: {sync_info['download_time']}")
+            
+            # Mostrar estado de la última subida
+            if upload_info["upload_time"]:
+                st.info(f"Último guardado: {upload_info['upload_time']}")
+            elif upload_info["status"] == "Error":
+                st.error(f"Error al subir: {upload_info['error']}")
+        elif sync_info["status"] == "Error":
+            st.error("Error de Sincronización")
+            st.caption(sync_info["error"])
+        else:
+            st.warning(f"Estado: {sync_info['status']}")
+            
+        # Botón de sincronización forzada
+        st.divider()
+        if st.button("🔄 Sincronizar Ahora", use_container_width=True, key="btn_sync_gdrive_now"):
+            st.cache_resource.clear()
+            st.rerun()
+except Exception as e:
+    st.sidebar.error(f"Error cargando módulo de sync: {e}")
+
+st.sidebar.divider()
+if st.button("🚪 Cerrar Sesión", use_container_width=True):
     st.session_state["usuario"] = None
     st.session_state["token"] = None
     st.query_params.clear()
@@ -1760,8 +1816,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                         INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (fecha_inicio.strftime("%Y-%m-%d"), maquina, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
-                        conn.commit()
-                        conn.close()
+                        guardar_cambios_db(conn)
                         st.success("¡Mantenimiento guardado!")
                         st.rerun()
         else:
@@ -1855,8 +1910,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                             iv_a, iv_b,
                             observaciones, st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                         ))
-                        conn.commit()
-                        conn.close()
+                        guardar_cambios_db(conn)
                         st.success(f"🎉 ¡Control Diario para {maquina_seleccionada} guardado con éxito!")
                         st.balloons()
                         st.rerun()
@@ -2155,8 +2209,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                     conn = get_connection()
                                     cursor = conn.cursor()
                                     cursor.execute("UPDATE planificacion SET Estado = 'En Ejecución' WHERE id = ?", (db_id,))
-                                    conn.commit()
-                                    conn.close()
+                                    guardar_cambios_db(conn)
                                     st.rerun()
                             
                             with st.popover("✏️ Editar OT"):
@@ -2178,8 +2231,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                             Maquina = ?, Tarea = ?, Tipo = ?, Prioridad = ?, Fecha_Prog = ?, Tecnico = ?, Detalle = ?
                                         WHERE id = ?
                                         """, (ed_maq, ed_tarea.strip(), ed_tipo, ed_prio, ed_fecha.strftime("%Y-%m-%d"), ed_tech, ed_det.strip(), db_id))
-                                        conn.commit()
-                                        conn.close()
+                                        guardar_cambios_db(conn)
                                         st.success("¡Orden de Trabajo modificada con éxito!")
                                         st.rerun()
 
@@ -2206,8 +2258,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                     INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     """, (fecha_hoy, row['Maquina'], tech_realizo, "Preventivo" if "Preventivo" in tipo_val else "Correctivo", "08:00", "1.0 hs", float(row['Horimetro_Est']) if pd.notna(row['Horimetro_Est']) else 0.0, det_auto, "Depósito Baigorria", fecha_c, "Ejecutado desde Planificación PCM.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
-                                    conn.commit()
-                                    conn.close()
+                                    guardar_cambios_db(conn)
                                     st.success("¡OT completada y registrada en el historial!")
                                     st.rerun()
                                     
@@ -2215,8 +2266,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                 conn = get_connection()
                                 cursor = conn.cursor()
                                 cursor.execute("UPDATE planificacion SET Estado = 'Cancelado' WHERE id = ?", (db_id,))
-                                conn.commit()
-                                conn.close()
+                                guardar_cambios_db(conn)
                                 st.rerun()
         else:
             st.info("🟢 No hay Órdenes de Trabajo pendientes en el programa de mantenimiento.")
@@ -2254,8 +2304,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                     INSERT INTO planificacion (Maquina, Tarea, Fecha_Prog, Estado, Fecha_Fin, Tecnico, Tipo, Prioridad, Detalle, Horimetro_Est)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (maq_ot, tarea_ot.strip(), fecha_prog_ot.strftime("%Y-%m-%d"), "Pendiente", "", tech_asig_ot, tipo_ot, prio_ot, detalle_ot.strip(), horim_est_ot))
-                    conn.commit()
-                    conn.close()
+                    guardar_cambios_db(conn)
                     st.success(f"🎉 Orden de Trabajo programada con éxito para {maq_ot}.")
                     st.rerun()
 
@@ -2297,8 +2346,7 @@ elif menu == "📦 Gestión de Repuestos e Insumos":
                 INSERT INTO stock (Fecha, Producto, Movimiento, Cantidad, Destino, FechaCreacion, HistorialModificaciones, CreadoPor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (datetime.now().strftime("%Y-%m-%d"), prod, tipo_m, cant, dest, fecha_creacion_stk, hist_stk, usr_stk))
-                conn.commit()
-                conn.close()
+                guardar_cambios_db(conn)
                 st.success("Stock actualizado.")
 
 # --- 5.5. REPORTE DE MOVIMIENTOS DE STOCK (REPUESTOS E INSUMOS) ---
@@ -2441,8 +2489,7 @@ elif menu == "📋 Reporte Movimientos Stock":
                                 Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, HistorialModificaciones = ?
                             WHERE id = ?
                             """, (edit_fecha.strftime("%Y-%m-%d"), edit_prod.strip(), edit_mov, edit_cant, edit_dest.strip(), nuevo_hist, db_id))
-                            conn.commit()
-                            conn.close()
+                            guardar_cambios_db(conn)
                             st.success("¡Registro de stock actualizado con éxito!")
                             st.rerun()
                             
@@ -2454,8 +2501,7 @@ elif menu == "📋 Reporte Movimientos Stock":
                             conn = get_connection()
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM stock WHERE id = ?", (db_id,))
-                            conn.commit()
-                            conn.close()
+                            guardar_cambios_db(conn)
                             st.success("¡Registro de stock eliminado con éxito!")
                             st.rerun()
         else:
@@ -2506,8 +2552,7 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
                 INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (datetime.now().strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd))
-                conn.commit()
-                conn.close()
+                guardar_cambios_db(conn)
                 st.success("Registrado.")
 
 # --- 7. BALANCES & REPORTES DE HIDROCARBUROS ---
@@ -2658,8 +2703,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                                 Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?, HistorialModificaciones = ?
                             WHERE id = ?
                             """, (edit_fecha_h.strftime("%Y-%m-%d"), edit_prod_h, edit_mov_h, edit_cant_h, edit_dest_h, op_val, nuevo_hist, db_id_h))
-                            conn.commit()
-                            conn.close()
+                            guardar_cambios_db(conn)
                             st.success("¡Registro de hidrocarburos actualizado con éxito!")
                             st.rerun()
                             
@@ -2671,8 +2715,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                             conn = get_connection()
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM hidrocarburos WHERE id = ?", (db_id_h,))
-                            conn.commit()
-                            conn.close()
+                            guardar_cambios_db(conn)
                             st.success("¡Registro de hidrocarburos eliminado con éxito!")
                             st.rerun()
         else:
@@ -2755,7 +2798,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                     cursor = conn.cursor()
                     try:
                         cursor.execute("INSERT INTO maquinas (Nombre) VALUES (?)", (nueva_m,))
-                        conn.commit()
+                        guardar_cambios_db(conn)
                     except sqlite3.IntegrityError:
                         st.error("Esa máquina ya está registrada.")
                     finally:
@@ -2770,8 +2813,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM maquinas WHERE Nombre = ?", (m_borrar,))
-                        conn.commit()
-                        conn.close()
+                        guardar_cambios_db(conn)
                         st.rerun()
                     
             st.divider()
@@ -2857,7 +2899,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                     cursor = conn.cursor()
                     try:
                         cursor.execute("INSERT INTO empleados (Nombre) VALUES (?)", (nueva_p,))
-                        conn.commit()
+                        guardar_cambios_db(conn)
                     except sqlite3.IntegrityError:
                         st.error("Ese empleado ya está registrado.")
                     finally:
@@ -2872,8 +2914,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM empleados WHERE Nombre = ?", (p_borrar,))
-                        conn.commit()
-                        conn.close()
+                        guardar_cambios_db(conn)
                         st.rerun()
 
         with col3:
@@ -2885,7 +2926,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                     cursor = conn.cursor()
                     try:
                         cursor.execute("INSERT INTO productos (Nombre) VALUES (?)", (nuevo_s,))
-                        conn.commit()
+                        guardar_cambios_db(conn)
                     except sqlite3.IntegrityError:
                         st.error("Ese producto ya está registrado.")
                     finally:
@@ -2900,8 +2941,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM productos WHERE Nombre = ?", (s_borrar,))
-                        conn.commit()
-                        conn.close()
+                        guardar_cambios_db(conn)
                         st.rerun()
 
 
@@ -2938,7 +2978,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                             try:
                                 cursor.execute("INSERT INTO usuarios (Usuario, Password, Token, Rol, Puesto, Nombre) VALUES (?, ?, ?, ?, ?, ?)",
                                                (nuevo_u.strip(), nuevo_p.strip(), token_u, nuevo_r, nuevo_rj.strip(), nuevo_nom.strip()))
-                                conn.commit()
+                                guardar_cambios_db(conn)
                                 st.success(f"🎉 Usuario '{nuevo_nom.strip()}' ('{nuevo_u.strip()}') registrado correctamente.")
                             except sqlite3.IntegrityError:
                                 st.error("⚠️ Ese nombre de usuario ya existe.")
@@ -2994,7 +3034,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                                                 Usuario = ?, Nombre = ?, Password = ?, Rol = ?, Puesto = ?
                                             WHERE Usuario = ?
                                             """, (edit_u.strip(), edit_nom.strip(), edit_p.strip(), edit_r, edit_rj.strip(), u_a_editar))
-                                            conn.commit()
+                                            guardar_cambios_db(conn)
                                             st.success(f"🎉 Cambios guardados para el usuario '{edit_u.strip()}'.")
                                             st.rerun()
                                     except sqlite3.IntegrityError:
@@ -3014,8 +3054,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                                 conn = sqlite3.connect("gestion_planta.db")
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM usuarios WHERE Usuario = ?", (u_a_borrar,))
-                                conn.commit()
-                                conn.close()
+                                guardar_cambios_db(conn)
                                 st.success(f"Usuario '{u_a_borrar}' eliminado con éxito.")
                                 st.rerun()
             else:
