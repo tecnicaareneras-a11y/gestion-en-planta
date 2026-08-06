@@ -1348,7 +1348,14 @@ def mostrar_registro_hidro_qr(prod_pre=None):
     
     empleados_list_db = cargar_lista_columna("empleados", "Nombre")
     maquinas_list_db = cargar_lista_columna("maquinas", "Nombre")
-    hidro_list_db = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
+    
+    # Cargar hidrocarburos y lubricantes dinámicamente de productos usando palabras clave
+    all_products_db = cargar_lista_columna("productos", "Nombre")
+    hidro_keywords_db = ["gas-oil", "gas oil", "gasoil", "aceite", "grasa", "hidráulico", "hidraulico", "lubricante"]
+    hidro_list_db = [p for p in all_products_db if any(k in p.lower() for k in hidro_keywords_db)]
+    for default_h in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]:
+        if default_h not in hidro_list_db:
+            hidro_list_db.append(default_h)
     
     usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
     indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list_db)
@@ -1361,6 +1368,7 @@ def mostrar_registro_hidro_qr(prod_pre=None):
         c1, c2 = st.columns(2)
         movimiento = c1.selectbox("Movimiento", ["Egreso", "Ingreso"])
         producto = c1.selectbox("Tipo de Hidrocarburo", hidro_list_db, index=idx_prod, placeholder="Escribe para buscar tipo...")
+        fecha_mov = c1.date_input("Fecha del Movimiento", value=datetime.now().date())
         cantidad = c2.number_input("Cantidad (Litros)", min_value=0.0, step=1.0)
         destino = c2.selectbox("Destino", ["Stock Central"] + maquinas_list_db, index=None, placeholder="Escribe para buscar destino...")
         operario = st.selectbox("Responsable / Técnico", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar responsable...")
@@ -1384,9 +1392,9 @@ def mostrar_registro_hidro_qr(prod_pre=None):
                 cursor.execute("""
                 INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (datetime.now().strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd))
+                """, (fecha_mov.strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd))
                 guardar_cambios_db(conn)
-                st.success("🎉 ¡Registro de Hidrocarburos guardado con éxito!")
+                st.success("🎉 ¡Control de Hidrocarburos guardado con éxito!")
                 st.balloons()
                 st.info("Ya puede continuar cargando o cerrar la ventana en su teléfono.")
 
@@ -1417,8 +1425,19 @@ elif "qr_hidro" in query_params:
 
 maquinas_list = cargar_lista_columna("maquinas", "Nombre")
 empleados_list = cargar_lista_columna("empleados", "Nombre")
-productos_list = cargar_lista_columna("productos", "Nombre")
-hidro_list = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
+
+# Cargar todos los productos y clasificarlos según palabras clave para evitar hardcoding
+all_products = cargar_lista_columna("productos", "Nombre")
+hidro_keywords = ["gas-oil", "gas oil", "gasoil", "aceite", "grasa", "hidráulico", "hidraulico", "lubricante"]
+
+# Filtrar combustibles y lubricantes
+hidro_list = [p for p in all_products if any(k in p.lower() for k in hidro_keywords)]
+for default_h in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]:
+    if default_h not in hidro_list:
+        hidro_list.append(default_h)
+
+# El resto son repuestos e insumos generales
+productos_list = [p for p in all_products if not any(k in p.lower() for k in hidro_keywords)]
 
 # --- INTERFAZ LATERAL ---
 st.sidebar.title("🛠️ GESTIÓN TÉCNICA")
@@ -2337,6 +2356,7 @@ elif menu == "📦 Gestión de Repuestos e Insumos":
         c1, c2 = st.columns(2)
         tipo_m = c1.selectbox("Acción", ["Ingreso", "Egreso"])
         prod = c1.selectbox("Producto", productos_list, index=None, placeholder="Escribe para buscar producto...")
+        fecha_mov = c1.date_input("Fecha del Movimiento", value=datetime.now().date())
         cant = c2.number_input("Cantidad", min_value=0.0)
         dest = c2.text_input("Ubicación / Destino")
         if st.form_submit_button("Registrar"):
@@ -2351,7 +2371,7 @@ elif menu == "📦 Gestión de Repuestos e Insumos":
                 cursor.execute("""
                 INSERT INTO stock (Fecha, Producto, Movimiento, Cantidad, Destino, FechaCreacion, HistorialModificaciones, CreadoPor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (datetime.now().strftime("%Y-%m-%d"), prod, tipo_m, cant, dest, fecha_creacion_stk, hist_stk, usr_stk))
+                """, (fecha_mov.strftime("%Y-%m-%d"), prod, tipo_m, cant, dest, fecha_creacion_stk, hist_stk, usr_stk))
                 guardar_cambios_db(conn)
                 st.success("Stock actualizado.")
 
@@ -2536,6 +2556,7 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
         c1, c2 = st.columns(2)
         t_m = c1.selectbox("Movimiento", ["Ingreso", "Egreso"])
         prod_h = c1.selectbox("Tipo", hidro_list, index=None, placeholder="Escribe para buscar tipo...")
+        fecha_h = c1.date_input("Fecha del Movimiento", value=datetime.now().date())
         cant_h = c2.number_input("Litros", min_value=0.0)
         dest_h = c2.selectbox("Destino", ["Stock Central"] + maquinas_list, index=None, placeholder="Escribe para buscar destino...")
         usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
@@ -2557,7 +2578,7 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
                 cursor.execute("""
                 INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (datetime.now().strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd))
+                """, (fecha_h.strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd))
                 guardar_cambios_db(conn)
                 st.success("Registrado.")
 
