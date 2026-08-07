@@ -2842,6 +2842,26 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         cursor.execute("DELETE FROM maquinas WHERE Nombre = ?", (m_borrar,))
                         guardar_cambios_db(conn)
                         st.rerun()
+            
+            st.divider()
+            # Botón de exportación Excel de Máquinas
+            df_maq_exp = pd.DataFrame({
+                "Nombre de la Máquina / Equipo": maquinas_list,
+                "Relevado (✓ / ✗)": "",
+                "Observaciones / Estado en Planta": ""
+            })
+            buf_maq = io.BytesIO()
+            with pd.ExcelWriter(buf_maq, engine='openpyxl') as writer:
+                df_maq_exp.to_excel(writer, sheet_name='Máquinas', index=False)
+            buf_maq.seek(0)
+            
+            st.download_button(
+                "📥 Exportar Planilla de Máquinas (Excel)",
+                data=buf_maq,
+                file_name="Planilla_Relevamiento_Maquinas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
                     
             st.divider()
             st.subheader("📋 Generación de Códigos QR para Máquinas")
@@ -2916,6 +2936,94 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 st.markdown("#### ⛽ **QR Surtidor / Estación de Servicio**")
                 st.write(f"🔗 **Enlace QR:** `{url_qr_hidro}`")
                 st.success("💡 **Instrucciones:** Al escanear este QR con cualquier celular, se abrirá el formulario directo para registrar Ingresos y Egresos de Gas-oil, Aceite Motor, Hidráulico o Grasa.")
+            
+            st.divider()
+            st.markdown("##### 📦 Exportación Masiva de Códigos QR")
+            st.write("Generá y descargá un archivo comprimido (.zip) con todos los códigos QR etiquetados de máquinas e hidrocarburos listos para imprimir.")
+            
+            if "qr_zip_bytes" not in st.session_state:
+                st.session_state["qr_zip_bytes"] = None
+                
+            if st.button("⚙️ Generar ZIP de Códigos QR", use_container_width=True):
+                with st.spinner("Generando Códigos QR con etiquetas (esto puede tomar unos segundos)..."):
+                    try:
+                        from PIL import Image, ImageDraw, ImageFont
+                        import zipfile
+                        from concurrent.futures import ThreadPoolExecutor
+                        
+                        tasks = []
+                        # Add machines
+                        for m in maquinas_list:
+                            url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(m)}"
+                            tasks.append((f"Maquina_{m.replace('/', '_').replace(' ', '_')}.png", f"🚜 {m}", url_m))
+                        # Add general surtidor
+                        url_g = f"{base_url_qr}/?qr_hidro=1"
+                        tasks.append(("Surtidor_General_Hidrocarburos.png", "⛽ Surtidor General", url_g))
+                        # Add specific hidros
+                        for h in hidro_list:
+                            url_h = f"{base_url_qr}/?qr_hidro={urllib.parse.quote(h)}"
+                            tasks.append((f"Lubricante_{h.replace('/', '_').replace(' ', '_')}.png", f"⛽ {h}", url_h))
+                            
+                        # Parallel execution
+                        def procesar_item(args):
+                            filename, label, url_target = args
+                            api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_target)}"
+                            try:
+                                req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+                                with urllib.request.urlopen(req) as r_api:
+                                    qr_bytes = r_api.read()
+                                qr_img = Image.open(io.BytesIO(qr_bytes))
+                            except:
+                                qr_img = Image.new('RGB', (250, 250), color='white')
+                                
+                            canvas = Image.new('RGB', (250, 300), color='white')
+                            canvas.paste(qr_img, (0, 0))
+                            
+                            # Draw label
+                            txt_w_1x = len(label) * 6
+                            txt_h_1x = 10
+                            if txt_w_1x <= 0:
+                                txt_w_1x = 1
+                            txt_canvas = Image.new('RGB', (txt_w_1x, txt_h_1x), color='white')
+                            draw_txt = ImageDraw.Draw(txt_canvas)
+                            draw_txt.text((0, 0), label, fill='black')
+                            
+                            txt_w_2x = txt_w_1x * 2
+                            txt_h_2x = txt_h_1x * 2
+                            txt_large = txt_canvas.resize((txt_w_2x, txt_h_2x), resample=Image.NEAREST)
+                            
+                            if txt_w_2x > 240:
+                                ratio = 240 / txt_w_2x
+                                txt_large = txt_large.resize((240, int(txt_h_2x * ratio)), resample=Image.BILINEAR)
+                                
+                            x = (250 - txt_large.width) // 2
+                            y = 250 + (50 - txt_large.height) // 2
+                            canvas.paste(txt_large, (x, y))
+                            
+                            out_buf = io.BytesIO()
+                            canvas.save(out_buf, format='PNG')
+                            return filename, out_buf.getvalue()
+                            
+                        zip_buf = io.BytesIO()
+                        with zipfile.ZipFile(zip_buf, 'w') as zip_file:
+                            with ThreadPoolExecutor(max_workers=15) as executor:
+                                results = list(executor.map(procesar_item, tasks))
+                                for filename, png_bytes in results:
+                                    zip_file.writestr(filename, png_bytes)
+                                    
+                        st.session_state["qr_zip_bytes"] = zip_buf.getvalue()
+                        st.success("¡Códigos QR generados con éxito!")
+                    except Exception as e:
+                        st.error(f"Error al generar códigos QR: {e}")
+                        
+            if st.session_state["qr_zip_bytes"] is not None:
+                st.download_button(
+                    "💾 Descargar Archivo ZIP de QRs (.zip)",
+                    data=st.session_state["qr_zip_bytes"],
+                    file_name="Codigos_QR_Imprimibles.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
 
         with col2:
             st.subheader("👤 Personal")
@@ -2943,6 +3051,26 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         cursor.execute("DELETE FROM empleados WHERE Nombre = ?", (p_borrar,))
                         guardar_cambios_db(conn)
                         st.rerun()
+            
+            st.divider()
+            # Botón de exportación Excel de Personal
+            df_pers_exp = pd.DataFrame({
+                "Nombre del Personal / Técnico": empleados_list,
+                "Presente / Activo (✓ / ✗)": "",
+                "Firma / Aclaración": ""
+            })
+            buf_pers = io.BytesIO()
+            with pd.ExcelWriter(buf_pers, engine='openpyxl') as writer:
+                df_pers_exp.to_excel(writer, sheet_name='Personal', index=False)
+            buf_pers.seek(0)
+            
+            st.download_button(
+                "📥 Exportar Planilla de Personal (Excel)",
+                data=buf_pers,
+                file_name="Planilla_Relevamiento_Personal.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
         with col3:
             st.subheader("📦 Repuestos")
@@ -2970,6 +3098,26 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         cursor.execute("DELETE FROM productos WHERE Nombre = ?", (s_borrar,))
                         guardar_cambios_db(conn)
                         st.rerun()
+            
+            st.divider()
+            # Botón de exportación Excel de Repuestos
+            df_rep_exp = pd.DataFrame({
+                "Nombre del Repuesto / Insumo": productos_list,
+                "Cantidad Real en Planta": "",
+                "Ubicación / Observaciones": ""
+            })
+            buf_rep = io.BytesIO()
+            with pd.ExcelWriter(buf_rep, engine='openpyxl') as writer:
+                df_rep_exp.to_excel(writer, sheet_name='Repuestos', index=False)
+            buf_rep.seek(0)
+            
+            st.download_button(
+                "📥 Exportar Planilla de Repuestos (Excel)",
+                data=buf_rep,
+                file_name="Planilla_Relevamiento_Repuestos.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
 
     with tab_usuarios:
