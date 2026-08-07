@@ -4,6 +4,7 @@ from datetime import datetime
 import sqlite3
 import os
 from io import BytesIO
+import io
 import socket
 import urllib.parse
 
