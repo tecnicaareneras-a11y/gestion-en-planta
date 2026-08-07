@@ -2811,7 +2811,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
 elif menu == "⚙️ Datos Maestros & Gestión QR":
     st.header("⚙️ Datos Maestros & Gestión QR")
     
-    tab_datos_maestros, tab_usuarios = st.tabs(["📊 Datos Maestros", "👥 Gestión de Usuarios"])
+    tab_datos_maestros, tab_usuarios, tab_auditoria = st.tabs(["📊 Datos Maestros", "👥 Gestión de Usuarios", "📋 Historial de Auditoría"])
     
     with tab_datos_maestros:
         st.header("⚙️ Configuración de Datos Maestros")
@@ -3233,6 +3233,98 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                                 st.rerun()
             else:
                 st.error("❌ Contraseña Maestra incorrecta.")
+
+    with tab_auditoria:
+        st.subheader("📋 Historial de Auditoría y Actividad de Usuarios")
+        st.write("Aquí puedes auditar quién registró o modificó cada dato en el sistema.")
+        
+        # Load activity from database
+        conn = get_connection()
+        activity_data = []
+        
+        # 1. Hidrocarburos
+        try:
+            df_hidro_aud = pd.read_sql_query("""
+                SELECT FechaCreacion, CreadoPor, Producto, Movimiento, Cantidad, Destino, HistorialModificaciones 
+                FROM hidrocarburos 
+                ORDER BY id DESC
+            """, conn)
+            for _, row in df_hidro_aud.iterrows():
+                creador = row['CreadoPor'] if row['CreadoPor'] else "Desconocido"
+                f_creacion = row['FechaCreacion'] if row['FechaCreacion'] else "Carga Inicial"
+                detalle = f"{row['Movimiento']} de {row['Cantidad']}L de {row['Producto']} con destino {row['Destino']}"
+                activity_data.append({
+                    "Fecha y Hora": f_creacion,
+                    "Usuario": creador,
+                    "Módulo": "⛽ Hidrocarburos",
+                    "Detalle / Operación": detalle,
+                    "Historial de Modificaciones": row['HistorialModificaciones']
+                })
+        except Exception as e:
+            st.error(f"Error cargando auditoría de hidrocarburos: {e}")
+            
+        # 2. Stock (Repuestos)
+        try:
+            df_stk_aud = pd.read_sql_query("""
+                SELECT FechaCreacion, CreadoPor, Producto, Movimiento, Cantidad, Destino, HistorialModificaciones 
+                FROM stock 
+                ORDER BY id DESC
+            """, conn)
+            for _, row in df_stk_aud.iterrows():
+                creador = row['CreadoPor'] if row['CreadoPor'] else "Desconocido"
+                f_creacion = row['FechaCreacion'] if row['FechaCreacion'] else "Carga Inicial"
+                detalle = f"{row['Movimiento']} de {row['Cantidad']} u. de '{row['Producto']}' en {row['Destino']}"
+                activity_data.append({
+                    "Fecha y Hora": f_creacion,
+                    "Usuario": creador,
+                    "Módulo": "📦 Stock (Repuestos)",
+                    "Detalle / Operación": detalle,
+                    "Historial de Modificaciones": row['HistorialModificaciones']
+                })
+        except Exception as e:
+            st.error(f"Error cargando auditoría de stock: {e}")
+            
+        # 3. Mantenimientos (OTs)
+        try:
+            df_maint_aud = pd.read_sql_query("""
+                SELECT FechaCreacion, CreadoPor, Maquina, Operario, Tipo, Detalle, HistorialModificaciones 
+                FROM mantenimientos 
+                ORDER BY id DESC
+            """, conn)
+            for _, row in df_maint_aud.iterrows():
+                creador = row['CreadoPor'] if row['CreadoPor'] else "Desconocido"
+                f_creacion = row['FechaCreacion'] if row['FechaCreacion'] else "Carga Inicial"
+                detalle = f"OT {row['Tipo']} para '{row['Maquina']}' realizada por {row['Operario']} - Detalle: {row['Detalle']}"
+                activity_data.append({
+                    "Fecha y Hora": f_creacion,
+                    "Usuario": creador,
+                    "Módulo": "🔧 Intervenciones (OT)",
+                    "Detalle / Operación": detalle,
+                    "Historial de Modificaciones": row['HistorialModificaciones']
+                })
+        except Exception as e:
+            st.error(f"Error cargando auditoría de mantenimientos: {e}")
+            
+        conn.close()
+        
+        if activity_data:
+            df_aud = pd.DataFrame(activity_data)
+            df_aud['temp_dt'] = pd.to_datetime(df_aud['Fecha y Hora'], errors='coerce')
+            df_aud = df_aud.sort_values(by='temp_dt', ascending=False).drop(columns=['temp_dt'])
+            
+            c_aud1, c_aud2 = st.columns(2)
+            filter_usr = c_aud1.multiselect("Filtrar por Usuario", options=list(df_aud["Usuario"].unique()))
+            filter_mod = c_aud2.multiselect("Filtrar por Módulo", options=list(df_aud["Módulo"].unique()))
+            
+            df_aud_filtered = df_aud.copy()
+            if filter_usr:
+                df_aud_filtered = df_aud_filtered[df_aud_filtered["Usuario"].isin(filter_usr)]
+            if filter_mod:
+                df_aud_filtered = df_aud_filtered[df_aud_filtered["Módulo"].isin(filter_mod)]
+                
+            st.dataframe(df_aud_filtered, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay registros de actividad todavía.")
 
 # --- 9. EXPORTACIÓN GLOBAL DE DATOS ---
 elif menu == "📥 Exportación Global de Datos":
