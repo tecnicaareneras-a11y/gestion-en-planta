@@ -2965,41 +2965,89 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                             url_h = f"{base_url_qr}/?qr_hidro={urllib.parse.quote(h)}"
                             tasks.append((f"Lubricante_{h.replace('/', '_').replace(' ', '_')}.png", f"⛽ {h}", url_h))
                             
-                        # Parallel execution
+                        def get_hd_font(size):
+                            candidates = [
+                                "C:\\Windows\\Fonts\\arialbd.ttf",
+                                "C:\\Windows\\Fonts\\arial.ttf",
+                                "C:\\Windows\\Fonts\\calibri.ttf",
+                                "C:\\Windows\\Fonts\\segoeui.ttf",
+                                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                                "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+                                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                            ]
+                            for p in candidates:
+                                if os.path.exists(p):
+                                    try:
+                                        return ImageFont.truetype(p, size)
+                                    except:
+                                        pass
+                            try:
+                                return ImageFont.load_default(size=size)
+                            except:
+                                return ImageFont.load_default()
+
+                        # Parallel execution (Ultra Alta Definición 1200x1500 px - Ideal para 15x15cm)
                         def procesar_item(args):
                             filename, label, url_target = args
-                            api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_target)}"
+                            # Descargar QR en alta resolución 1000x1000 px
+                            api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data={urllib.parse.quote(url_target)}"
                             try:
                                 req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
                                 with urllib.request.urlopen(req) as r_api:
                                     qr_bytes = r_api.read()
                                 qr_img = Image.open(io.BytesIO(qr_bytes))
                             except:
-                                qr_img = Image.new('RGB', (250, 250), color='white')
+                                qr_img = Image.new('RGB', (1000, 1000), color='white')
                                 
-                            canvas = Image.new('RGB', (250, 300), color='white')
-                            canvas.paste(qr_img, (0, 0))
+                            W, H = 1200, 1500
+                            canvas = Image.new('RGB', (W, H), color='white')
+                            draw = ImageDraw.Draw(canvas)
                             
-                            # Draw label
-                            txt_w_1x = len(label) * 6
-                            txt_h_1x = 10
-                            if txt_w_1x <= 0:
-                                txt_w_1x = 1
-                            txt_canvas = Image.new('RGB', (txt_w_1x, txt_h_1x), color='white')
-                            draw_txt = ImageDraw.Draw(txt_canvas)
-                            draw_txt.text((0, 0), label, fill='black')
+                            # Marco exterior sutil de corte
+                            draw.rectangle([(20, 20), (W - 20, H - 20)], outline=(200, 200, 200), width=3)
                             
-                            txt_w_2x = txt_w_1x * 2
-                            txt_h_2x = txt_h_1x * 2
-                            txt_large = txt_canvas.resize((txt_w_2x, txt_h_2x), resample=Image.NEAREST)
+                            # Encabezado superior
+                            font_header = get_hd_font(36)
+                            header_text = "GESTIÓN TÉCNICA • CONTROL DE PLANTA"
+                            try:
+                                w_h = draw.textlength(header_text, font=font_header)
+                            except:
+                                w_h = len(header_text) * 20
+                            draw.text(((W - w_h) // 2, 50), header_text, fill=(100, 100, 100), font=font_header)
+                            draw.line([(50, 100), (W - 50, 100)], fill=(220, 220, 220), width=2)
                             
-                            if txt_w_2x > 240:
-                                ratio = 240 / txt_w_2x
-                                txt_large = txt_large.resize((240, int(txt_h_2x * ratio)), resample=Image.BILINEAR)
+                            # Pegar código QR en el centro
+                            canvas.paste(qr_img, (100, 130))
+                            
+                            # Línea separadora inferior
+                            draw.line([(50, 1160), (W - 50, 1160)], fill=(220, 220, 220), width=2)
+                            
+                            # Denominación principal del equipo / combustible (Fuente Grande y Nítida)
+                            font_label = get_hd_font(56)
+                            try:
+                                w_lbl = draw.textlength(label, font=font_label)
+                            except:
+                                w_lbl = len(label) * 32
                                 
-                            x = (250 - txt_large.width) // 2
-                            y = 250 + (50 - txt_large.height) // 2
-                            canvas.paste(txt_large, (x, y))
+                            # Ajustar si el nombre es muy largo
+                            if w_lbl > 1100:
+                                font_label = get_hd_font(42)
+                                try:
+                                    w_lbl = draw.textlength(label, font=font_label)
+                                except:
+                                    w_lbl = len(label) * 24
+                                    
+                            draw.text(((W - w_lbl) // 2, 1200), label, fill=(15, 23, 42), font=font_label)
+                            
+                            # Subtítulo con instrucciones
+                            sub_text = "Escanear con celular para registrar actividad o control diario"
+                            font_sub = get_hd_font(32)
+                            try:
+                                w_sub = draw.textlength(sub_text, font=font_sub)
+                            except:
+                                w_sub = len(sub_text) * 18
+                            draw.text(((W - w_sub) // 2, 1300), sub_text, fill=(100, 116, 139), font=font_sub)
                             
                             out_buf = io.BytesIO()
                             canvas.save(out_buf, format='PNG')
