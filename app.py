@@ -2952,18 +2952,31 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         import zipfile
                         from concurrent.futures import ThreadPoolExecutor
                         
+                        import unicodedata
+                        import re
+                        
+                        def limpiar_texto_para_qr(txt):
+                            if not txt:
+                                return ""
+                            txt_no_emoji = re.sub(r'[\U00010000-\U0010ffff]', '', str(txt))
+                            txt_normalized = unicodedata.normalize('NFKD', txt_no_emoji).encode('ASCII', 'ignore').decode('ASCII')
+                            txt_clean = txt_normalized.replace('•', '-').replace('–', '-').replace('—', '-')
+                            return " ".join(txt_clean.split())
+
                         tasks = []
                         # Add machines
                         for m in maquinas_list:
+                            clean_m = limpiar_texto_para_qr(m)
                             url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(m)}"
-                            tasks.append((f"Maquina_{m.replace('/', '_').replace(' ', '_')}.png", f"🚜 {m}", url_m))
+                            tasks.append((f"Maquina_{clean_m.replace('/', '_').replace(' ', '_')}.png", "[ EQUIPO / MAQUINARIA ]", clean_m, url_m))
                         # Add general surtidor
                         url_g = f"{base_url_qr}/?qr_hidro=1"
-                        tasks.append(("Surtidor_General_Hidrocarburos.png", "⛽ Surtidor General", url_g))
+                        tasks.append(("Surtidor_General_Hidrocarburos.png", "[ SURTIDOR GENERAL ]", "ESTACION DE HIDROCARBUROS", url_g))
                         # Add specific hidros
                         for h in hidro_list:
+                            clean_h = limpiar_texto_para_qr(h)
                             url_h = f"{base_url_qr}/?qr_hidro={urllib.parse.quote(h)}"
-                            tasks.append((f"Lubricante_{h.replace('/', '_').replace(' ', '_')}.png", f"⛽ {h}", url_h))
+                            tasks.append((f"Lubricante_{clean_h.replace('/', '_').replace(' ', '_')}.png", "[ COMBUSTIBLE / LUBRICANTE ]", clean_h, url_h))
                             
                         def get_hd_font(size):
                             candidates = [
@@ -2989,7 +3002,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
 
                         # Parallel execution (Ultra Alta Definición 1200x1500 px - Ideal para 15x15cm)
                         def procesar_item(args):
-                            filename, label, url_target = args
+                            filename, categoria, label, url_target = args
                             # Descargar QR en alta resolución 1000x1000 px
                             api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data={urllib.parse.quote(url_target)}"
                             try:
@@ -3008,46 +3021,55 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                             draw.rectangle([(20, 20), (W - 20, H - 20)], outline=(200, 200, 200), width=3)
                             
                             # Encabezado superior
-                            font_header = get_hd_font(36)
-                            header_text = "GESTIÓN TÉCNICA • CONTROL DE PLANTA"
+                            font_header = get_hd_font(34)
+                            header_text = "GESTION TECNICA - CONTROL DE PLANTA"
                             try:
                                 w_h = draw.textlength(header_text, font=font_header)
                             except:
                                 w_h = len(header_text) * 20
                             draw.text(((W - w_h) // 2, 50), header_text, fill=(100, 100, 100), font=font_header)
-                            draw.line([(50, 100), (W - 50, 100)], fill=(220, 220, 220), width=2)
+                            draw.line([(50, 95), (W - 50, 95)], fill=(220, 220, 220), width=2)
                             
                             # Pegar código QR en el centro
-                            canvas.paste(qr_img, (100, 130))
+                            canvas.paste(qr_img, (100, 120))
                             
                             # Línea separadora inferior
-                            draw.line([(50, 1160), (W - 50, 1160)], fill=(220, 220, 220), width=2)
+                            draw.line([(50, 1150), (W - 50, 1150)], fill=(220, 220, 220), width=2)
+                            
+                            # Categoría badge superior
+                            font_cat = get_hd_font(28)
+                            try:
+                                w_cat = draw.textlength(categoria, font=font_cat)
+                            except:
+                                w_cat = len(categoria) * 16
+                            draw.text(((W - w_cat) // 2, 1175), categoria, fill=(100, 116, 139), font=font_cat)
                             
                             # Denominación principal del equipo / combustible (Fuente Grande y Nítida)
-                            font_label = get_hd_font(56)
+                            label_upper = label.upper()
+                            font_label = get_hd_font(52)
                             try:
-                                w_lbl = draw.textlength(label, font=font_label)
+                                w_lbl = draw.textlength(label_upper, font=font_label)
                             except:
-                                w_lbl = len(label) * 32
+                                w_lbl = len(label_upper) * 30
                                 
                             # Ajustar si el nombre es muy largo
                             if w_lbl > 1100:
-                                font_label = get_hd_font(42)
+                                font_label = get_hd_font(40)
                                 try:
-                                    w_lbl = draw.textlength(label, font=font_label)
+                                    w_lbl = draw.textlength(label_upper, font=font_label)
                                 except:
-                                    w_lbl = len(label) * 24
+                                    w_lbl = len(label_upper) * 22
                                     
-                            draw.text(((W - w_lbl) // 2, 1200), label, fill=(15, 23, 42), font=font_label)
+                            draw.text(((W - w_lbl) // 2, 1225), label_upper, fill=(15, 23, 42), font=font_label)
                             
                             # Subtítulo con instrucciones
                             sub_text = "Escanear con celular para registrar actividad o control diario"
-                            font_sub = get_hd_font(32)
+                            font_sub = get_hd_font(30)
                             try:
                                 w_sub = draw.textlength(sub_text, font=font_sub)
                             except:
-                                w_sub = len(sub_text) * 18
-                            draw.text(((W - w_sub) // 2, 1300), sub_text, fill=(100, 116, 139), font=font_sub)
+                                w_sub = len(sub_text) * 16
+                            draw.text(((W - w_sub) // 2, 1315), sub_text, fill=(100, 116, 139), font=font_sub)
                             
                             out_buf = io.BytesIO()
                             canvas.save(out_buf, format='PNG')
