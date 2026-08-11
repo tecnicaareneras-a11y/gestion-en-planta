@@ -714,9 +714,8 @@ def init_db():
         conn.commit()
     conn.close()
 
-# --- DESCARGAR BASE DE DATOS DE GOOGLE DRIVE AL INICIAR ---
-@st.cache_resource
-def descargar_db_inicial():
+# --- DESCARGAR BASE DE DATOS DE GOOGLE DRIVE AL INICIAR / NUEVA SESIÓN ---
+def descargar_db_desde_nube():
     try:
         import gdrive_sync
         success = gdrive_sync.descargar_db_desde_gdrive()
@@ -732,8 +731,10 @@ def descargar_db_inicial():
             "error": str(e)
         }
 
-# Descargar base de datos antes de inicializarla/migrarla
-descargar_db_inicial()
+# Descargar automáticamente la base de datos más reciente de Google Drive al inicio de cada sesión
+if "session_db_synced" not in st.session_state:
+    descargar_db_desde_nube()
+    st.session_state["session_db_synced"] = True
 
 # Inicializar Base de Datos al arrancar la app y migrar datos antiguos
 init_db()
