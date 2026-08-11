@@ -1776,7 +1776,16 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
         st.warning("⚠️ Primero cargue máquinas y personal en la pestaña Configuración.")
     else:
         if tipo_registro == "🔧 Registrar Mantenimiento Realizado":
-            with st.form("form_mant"):
+            if "mant_form_counter" not in st.session_state:
+                st.session_state["mant_form_counter"] = 0
+            if "mant_success_msg" not in st.session_state:
+                st.session_state["mant_success_msg"] = None
+
+            if st.session_state["mant_success_msg"]:
+                st.success(st.session_state["mant_success_msg"])
+                st.session_state["mant_success_msg"] = None
+
+            with st.form(f"form_mant_{st.session_state['mant_form_counter']}"):
                 c1, c2 = st.columns(2)
                 fecha_inicio = c1.date_input("Fecha Inicio", datetime.now(), format="DD/MM/YYYY")
                 fecha_fin = c2.date_input("Fecha Finalización", value=fecha_inicio, format="DD/MM/YYYY")
@@ -1793,17 +1802,17 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                 
                 st.markdown("##### 🔧 Tareas Realizadas (Selecciona con clics):")
                 col1, col2 = st.columns(2)
-                t1 = col1.checkbox("Revisión General", key="fm_t1")
-                t2 = col1.checkbox("Lubricación / Engrase", key="fm_t2")
-                t3 = col1.checkbox("Cambio de Aceite", key="fm_t3")
-                t7 = col1.checkbox("Reparación Mecánica", key="fm_t7")
-                t4 = col2.checkbox("Limpieza de Filtros", key="fm_t4")
-                t5 = col2.checkbox("Ajuste de Correas / Pernos", key="fm_t5")
-                t6 = col2.checkbox("Reparación Eléctrica", key="fm_t6")
+                t1 = col1.checkbox("Revisión General", key=f"fm_t1_{st.session_state['mant_form_counter']}")
+                t2 = col1.checkbox("Lubricación / Engrase", key=f"fm_t2_{st.session_state['mant_form_counter']}")
+                t3 = col1.checkbox("Cambio de Aceite", key=f"fm_t3_{st.session_state['mant_form_counter']}")
+                t7 = col1.checkbox("Reparación Mecánica", key=f"fm_t7_{st.session_state['mant_form_counter']}")
+                t4 = col2.checkbox("Limpieza de Filtros", key=f"fm_t4_{st.session_state['mant_form_counter']}")
+                t5 = col2.checkbox("Ajuste de Correas / Pernos", key=f"fm_t5_{st.session_state['mant_form_counter']}")
+                t6 = col2.checkbox("Reparación Eléctrica", key=f"fm_t6_{st.session_state['mant_form_counter']}")
                 
                 repuestos = st.text_area("Observación / Repuestos usados (opcional)", placeholder="Ej: Se cambiaron retenes, juntas o repuestos...")
                 
-                if st.form_submit_button("Guardar Registro"):
+                if st.form_submit_button("Guardar Registro", use_container_width=True):
                     if not maquina:
                         st.error("⚠️ Por favor selecciona la máquina intervenida.")
                     elif not operario:
@@ -1843,7 +1852,8 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (fecha_inicio.strftime("%Y-%m-%d"), maquina, operario, tipo, hora_ini_str, hora_fin_str, horimetro, detalle_final, deposito, fecha_creacion, "Creado desde la aplicación.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
                         guardar_cambios_db(conn)
-                        st.success("¡Mantenimiento guardado!")
+                        st.session_state["mant_form_counter"] += 1
+                        st.session_state["mant_success_msg"] = f"🎉 ¡Mantenimiento para '{maquina}' guardado con éxito! El panel se ha limpiado para la próxima carga."
                         st.rerun()
         else:
             # 1. Selección de máquina base (fuera del formulario para respuesta rápida al clic)
@@ -1874,7 +1884,16 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                 maquina_seleccionada = st.session_state["maquina_seleccionada_pc"]
                 st.info(f"💡 Evaluando equipo base: **{maquina_seleccionada}** (Todos los puntos inician en 'OK ✔️' por defecto, solo cambia los que tengan fallas)")
 
-            with st.form("form_checklist_pc"):
+            if "chk_form_counter" not in st.session_state:
+                st.session_state["chk_form_counter"] = 0
+            if "chk_success_msg" not in st.session_state:
+                st.session_state["chk_success_msg"] = None
+
+            if st.session_state["chk_success_msg"]:
+                st.success(st.session_state["chk_success_msg"])
+                st.session_state["chk_success_msg"] = None
+
+            with st.form(f"form_checklist_pc_{st.session_state['chk_form_counter']}"):
                 c1, c2 = st.columns(2)
                 fecha = c1.date_input("Fecha", datetime.now(), format="DD/MM/YYYY")
                 usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
@@ -1910,7 +1929,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                 st.subheader("📝 Observaciones Adicionales")
                 observaciones = st.text_area("Notas / Diagnóstico")
                 
-                guardar_cd = st.form_submit_button("💾 Guardar Control Diario")
+                guardar_cd = st.form_submit_button("💾 Guardar Control Diario", use_container_width=True)
                 if guardar_cd:
                     if not maquina_seleccionada:
                         st.error("⚠️ Por favor selecciona la máquina.")
@@ -1937,8 +1956,8 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                             observaciones, st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                         ))
                         guardar_cambios_db(conn)
-                        st.success(f"🎉 ¡Control Diario para {maquina_seleccionada} guardado con éxito!")
-                        st.balloons()
+                        st.session_state["chk_form_counter"] += 1
+                        st.session_state["chk_success_msg"] = f"🎉 ¡Control Diario para '{maquina_seleccionada}' guardado con éxito! El panel se ha limpiado para la próxima carga."
                         st.rerun()
 
 # --- 3. REPORTE MANTENIMIENTO REALIZADO ---
@@ -2353,14 +2372,23 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
 # --- 5. GESTIÓN DE REPUESTOS E INSUMOS ---
 elif menu == "📦 Gestión de Repuestos e Insumos":
     st.header("📦 Movimientos de Stock")
-    with st.form("f_stock"):
+    if "stock_form_counter" not in st.session_state:
+        st.session_state["stock_form_counter"] = 0
+    if "stock_success_msg" not in st.session_state:
+        st.session_state["stock_success_msg"] = None
+
+    if st.session_state["stock_success_msg"]:
+        st.success(st.session_state["stock_success_msg"])
+        st.session_state["stock_success_msg"] = None
+
+    with st.form(f"f_stock_{st.session_state['stock_form_counter']}"):
         c1, c2 = st.columns(2)
         tipo_m = c1.selectbox("Acción", ["Ingreso", "Egreso"])
         prod = c1.selectbox("Producto", productos_list, index=None, placeholder="Escribe para buscar producto...")
         fecha_mov = c1.date_input("Fecha del Movimiento", value=datetime.now().date())
         cant = c2.number_input("Cantidad", min_value=0.0)
         dest = c2.text_input("Ubicación / Destino")
-        if st.form_submit_button("Registrar"):
+        if st.form_submit_button("Registrar", use_container_width=True):
             if not prod:
                 st.error("⚠️ Por favor selecciona un producto.")
             else:
@@ -2374,7 +2402,9 @@ elif menu == "📦 Gestión de Repuestos e Insumos":
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (fecha_mov.strftime("%Y-%m-%d"), prod, tipo_m, cant, dest, fecha_creacion_stk, hist_stk, usr_stk))
                 guardar_cambios_db(conn)
-                st.success("Stock actualizado.")
+                st.session_state["stock_form_counter"] += 1
+                st.session_state["stock_success_msg"] = f"🎉 ¡Movimiento de Stock para '{prod}' registrado con éxito! El panel se ha limpiado para la próxima carga."
+                st.rerun()
 
 # --- 5.5. REPORTE DE MOVIMIENTOS DE STOCK (REPUESTOS E INSUMOS) ---
 elif menu == "📋 Reporte Movimientos Stock":
@@ -2553,7 +2583,16 @@ elif menu == "📋 Reporte Movimientos Stock":
 # --- 6. GESTIÓN DE COMBUSTIBLES & LUBRICANTES ---
 elif menu == "⛽ Gestión de Combustibles & Lubricantes":
     st.header("⛽ Gestión de Combustibles & Lubricantes")
-    with st.form("f_hidro"):
+    if "hidro_form_counter" not in st.session_state:
+        st.session_state["hidro_form_counter"] = 0
+    if "hidro_success_msg" not in st.session_state:
+        st.session_state["hidro_success_msg"] = None
+
+    if st.session_state["hidro_success_msg"]:
+        st.success(st.session_state["hidro_success_msg"])
+        st.session_state["hidro_success_msg"] = None
+
+    with st.form(f"f_hidro_{st.session_state['hidro_form_counter']}"):
         c1, c2 = st.columns(2)
         t_m = c1.selectbox("Movimiento", ["Ingreso", "Egreso"])
         prod_h = c1.selectbox("Tipo", hidro_list, index=None, placeholder="Escribe para buscar tipo...")
@@ -2563,7 +2602,7 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
         usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
         indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
         oper_h = st.selectbox("Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar responsable...")
-        if st.form_submit_button("Cargar Registro"):
+        if st.form_submit_button("Cargar Registro", use_container_width=True):
             if not prod_h:
                 st.error("⚠️ Por favor selecciona el tipo de hidrocarburo.")
             elif not dest_h:
@@ -2581,7 +2620,9 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (fecha_h.strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd))
                 guardar_cambios_db(conn)
-                st.success("Registrado.")
+                st.session_state["hidro_form_counter"] += 1
+                st.session_state["hidro_success_msg"] = f"🎉 ¡Movimiento de '{prod_h}' ({cant_h} Litros) registrado con éxito! El panel se ha limpiado para la próxima carga."
+                st.rerun()
 
 # --- 7. BALANCES & REPORTES DE HIDROCARBUROS ---
 elif menu == "📋 Balances & Reportes de Hidrocarburos":
