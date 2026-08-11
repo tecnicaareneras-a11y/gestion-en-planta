@@ -731,6 +731,9 @@ def descargar_db_desde_nube():
             "error": str(e)
         }
 
+# Alias para compatibilidad
+descargar_db_inicial = descargar_db_desde_nube
+
 # Descargar automáticamente la base de datos más reciente de Google Drive al inicio de cada sesión
 if "session_db_synced" not in st.session_state:
     descargar_db_desde_nube()
@@ -1481,7 +1484,7 @@ st.sidebar.write(f"👤 Sesión: **{nombre_mostrado}**")
 # --- INDICADOR DE SINCRONIZACIÓN DE GOOGLE DRIVE ---
 try:
     import gdrive_sync
-    sync_info = descargar_db_inicial()
+    sync_info = descargar_db_desde_nube()
     upload_info = gdrive_sync.LAST_SYNC
     with st.sidebar.expander("☁️ Estado de Nube Google Drive", expanded=True):
         if sync_info["status"] == "OK":
@@ -1503,7 +1506,8 @@ try:
         # Botón de sincronización forzada
         st.divider()
         if st.button("🔄 Sincronizar Ahora", use_container_width=True, key="btn_sync_gdrive_now"):
-            st.cache_resource.clear()
+            with st.spinner("Sincronizando con Google Drive..."):
+                gdrive_sync.descargar_db_desde_gdrive()
             st.rerun()
 except Exception as e:
     st.sidebar.error(f"Error cargando módulo de sync: {e}")
