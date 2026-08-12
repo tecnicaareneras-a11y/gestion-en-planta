@@ -2970,7 +2970,153 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 
             base_url_qr = url_externa.strip().rstrip("/") if url_externa.strip() else "https://gestion-en-planta-adlc.streamlit.app"
 
+            import unicodedata
+            import re
+            from PIL import Image, ImageDraw, ImageFont
+            import zipfile
+            from concurrent.futures import ThreadPoolExecutor
+
+            def limpiar_texto_para_qr(txt):
+                if not txt:
+                    return ""
+                txt_no_emoji = re.sub(r'[\U00010000-\U0010ffff]', '', str(txt))
+                txt_normalized = unicodedata.normalize('NFKD', txt_no_emoji).encode('ASCII', 'ignore').decode('ASCII')
+                txt_clean = txt_normalized.replace('•', '-').replace('–', '-').replace('—', '-')
+                return " ".join(txt_clean.split())
+
+            def get_hd_font(size):
+                candidates = [
+                    "C:\\Windows\\Fonts\\arialbd.ttf",
+                    "C:\\Windows\\Fonts\\arial.ttf",
+                    "C:\\Windows\\Fonts\\calibri.ttf",
+                    "C:\\Windows\\Fonts\\segoeui.ttf",
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                ]
+                for p in candidates:
+                    if os.path.exists(p):
+                        try:
+                            return ImageFont.truetype(p, size)
+                        except:
+                            pass
+                try:
+                    return ImageFont.load_default(size=size)
+                except:
+                    return ImageFont.load_default()
+
+            def generar_placa_qr_hd(categoria, label, url_target, sub_text="Escanear con celular para registrar actividad o control diario"):
+                api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data={urllib.parse.quote(url_target)}"
+                try:
+                    req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req) as r_api:
+                        qr_bytes = r_api.read()
+                    qr_img = Image.open(io.BytesIO(qr_bytes))
+                except:
+                    qr_img = Image.new('RGB', (1000, 1000), color='white')
+                    
+                W, H = 1200, 1500
+                canvas = Image.new('RGB', (W, H), color='white')
+                draw = ImageDraw.Draw(canvas)
+                
+                # Marco exterior sutil de corte
+                draw.rectangle([(20, 20), (W - 20, H - 20)], outline=(200, 200, 200), width=3)
+                
+                # Encabezado superior
+                font_header = get_hd_font(34)
+                header_text = "GESTION TECNICA - CONTROL DE PLANTA"
+                try:
+                    w_h = draw.textlength(header_text, font=font_header)
+                except:
+                    w_h = len(header_text) * 20
+                draw.text(((W - w_h) // 2, 50), header_text, fill=(100, 100, 100), font=font_header)
+                draw.line([(50, 95), (W - 50, 95)], fill=(220, 220, 220), width=2)
+                
+                # Pegar código QR en el centro
+                canvas.paste(qr_img, (100, 120))
+                
+                # Línea separadora inferior
+                draw.line([(50, 1150), (W - 50, 1150)], fill=(220, 220, 220), width=2)
+                
+                # Categoría badge superior
+                clean_cat = limpiar_texto_para_qr(categoria)
+                font_cat = get_hd_font(28)
+                try:
+                    w_cat = draw.textlength(clean_cat, font=font_cat)
+                except:
+                    w_cat = len(clean_cat) * 16
+                draw.text(((W - w_cat) // 2, 1175), clean_cat, fill=(100, 116, 139), font=font_cat)
+                
+                # Denominación principal del equipo / combustible / app (Fuente Grande y Nítida)
+                label_upper = limpiar_texto_para_qr(label).upper()
+                font_label = get_hd_font(52)
+                try:
+                    w_lbl = draw.textlength(label_upper, font=font_label)
+                except:
+                    w_lbl = len(label_upper) * 30
+                    
+                # Ajustar si el nombre es muy largo
+                if w_lbl > 1100:
+                    font_label = get_hd_font(40)
+                    try:
+                        w_lbl = draw.textlength(label_upper, font=font_label)
+                    except:
+                        w_lbl = len(label_upper) * 22
+                        
+                draw.text(((W - w_lbl) // 2, 1225), label_upper, fill=(15, 23, 42), font=font_label)
+                
+                # Subtítulo con instrucciones
+                clean_sub = limpiar_texto_para_qr(sub_text)
+                font_sub = get_hd_font(30)
+                try:
+                    w_sub = draw.textlength(clean_sub, font=font_sub)
+                except:
+                    w_sub = len(clean_sub) * 16
+                draw.text(((W - w_sub) // 2, 1315), clean_sub, fill=(100, 116, 139), font=font_sub)
+                
+                out_buf = io.BytesIO()
+                canvas.save(out_buf, format='PNG')
+                return out_buf.getvalue()
+
+            st.divider()
+            st.subheader("📱 Código QR de Acceso a la Aplicación (Login / Sistema)")
+            st.markdown("Imprimí y colocá este código QR en el ingreso a planta, oficinas, tableros o salas de reuniones. Al escanearlo con la cámara del celular, abrirá directamente la pantalla de inicio y acceso al sistema.")
+
+            col_app1, col_app2 = st.columns([1, 2])
+            url_app = base_url_qr
+            api_qr_app = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_app)}"
+            with col_app1:
+                st.image(api_qr_app, caption="QR Acceso General a la App")
+            with col_app2:
+                st.markdown("#### 📱 **Acceso Directo al Sistema CMMS**")
+                st.write(f"🔗 **URL:** `{url_app}`")
+                st.caption("Al escanear este código QR, cualquier usuario u operario ingresa directamente al inicio de la aplicación.")
+                
+                if "qr_app_hd_bytes" not in st.session_state:
+                    st.session_state["qr_app_hd_bytes"] = None
+                    
+                if st.button("🖼️ Generar Placa QR de Acceso en Alta Definición (15x15cm)", use_container_width=True):
+                    with st.spinner("Generando placa Ultra-HD..."):
+                        st.session_state["qr_app_hd_bytes"] = generar_placa_qr_hd(
+                            categoria="[ ACCESO AL SISTEMA ]",
+                            label="ARENERAS DE LA CRUZ Y ROZAS",
+                            url_target=url_app,
+                            sub_text="Escanear con celular para ingresar a la aplicacion web"
+                        )
+                        
+                if st.session_state["qr_app_hd_bytes"] is not None:
+                    st.download_button(
+                        "💾 Descargar Placa QR de Acceso (.png HD)",
+                        data=st.session_state["qr_app_hd_bytes"],
+                        file_name="00_Acceso_General_App.png",
+                        mime="image/png",
+                        use_container_width=True
+                    )
+
             if maquinas_list:
+                st.divider()
+                st.subheader("📋 Generación de Códigos QR para Máquinas")
                 st.markdown("##### 📌 Generar QR de una Máquina Individual")
                 m_qr = st.selectbox("Seleccionar Máquina para QR", ["-- Seleccionar --"] + maquinas_list)
                 if m_qr != "-- Seleccionar --":
@@ -3024,132 +3170,31 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
             if st.button("⚙️ Generar ZIP de Códigos QR", use_container_width=True):
                 with st.spinner("Generando Códigos QR con etiquetas (esto puede tomar unos segundos)..."):
                     try:
-                        from PIL import Image, ImageDraw, ImageFont
-                        import zipfile
-                        from concurrent.futures import ThreadPoolExecutor
-                        
-                        import unicodedata
-                        import re
-                        
-                        def limpiar_texto_para_qr(txt):
-                            if not txt:
-                                return ""
-                            txt_no_emoji = re.sub(r'[\U00010000-\U0010ffff]', '', str(txt))
-                            txt_normalized = unicodedata.normalize('NFKD', txt_no_emoji).encode('ASCII', 'ignore').decode('ASCII')
-                            txt_clean = txt_normalized.replace('•', '-').replace('–', '-').replace('—', '-')
-                            return " ".join(txt_clean.split())
-
                         tasks = []
-                        # Add machines
+                        # 0. Add App Access QR
+                        tasks.append(("00_Acceso_General_App.png", "[ ACCESO AL SISTEMA ]", "ARENERAS DE LA CRUZ Y ROZAS", base_url_qr, "Escanear con celular para ingresar a la aplicacion web"))
+                        
+                        # 1. Add machines
                         for m in maquinas_list:
                             clean_m = limpiar_texto_para_qr(m)
                             url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(m)}"
-                            tasks.append((f"Maquina_{clean_m.replace('/', '_').replace(' ', '_')}.png", "[ EQUIPO / MAQUINARIA ]", clean_m, url_m))
-                        # Add general surtidor
+                            tasks.append((f"Maquina_{clean_m.replace('/', '_').replace(' ', '_')}.png", "[ EQUIPO / MAQUINARIA ]", clean_m, url_m, "Escanear con celular para registrar actividad o control diario"))
+                            
+                        # 2. Add general surtidor
                         url_g = f"{base_url_qr}/?qr_hidro=1"
-                        tasks.append(("Surtidor_General_Hidrocarburos.png", "[ SURTIDOR GENERAL ]", "ESTACION DE HIDROCARBUROS", url_g))
-                        # Add specific hidros
+                        tasks.append(("Surtidor_General_Hidrocarburos.png", "[ SURTIDOR GENERAL ]", "ESTACION DE HIDROCARBUROS", url_g, "Escanear con celular para registrar ingreso o egreso de combustible"))
+                        
+                        # 3. Add specific hidros
                         for h in hidro_list:
                             clean_h = limpiar_texto_para_qr(h)
                             url_h = f"{base_url_qr}/?qr_hidro={urllib.parse.quote(h)}"
-                            tasks.append((f"Lubricante_{clean_h.replace('/', '_').replace(' ', '_')}.png", "[ COMBUSTIBLE / LUBRICANTE ]", clean_h, url_h))
-                            
-                        def get_hd_font(size):
-                            candidates = [
-                                "C:\\Windows\\Fonts\\arialbd.ttf",
-                                "C:\\Windows\\Fonts\\arial.ttf",
-                                "C:\\Windows\\Fonts\\calibri.ttf",
-                                "C:\\Windows\\Fonts\\segoeui.ttf",
-                                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                                "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-                                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-                            ]
-                            for p in candidates:
-                                if os.path.exists(p):
-                                    try:
-                                        return ImageFont.truetype(p, size)
-                                    except:
-                                        pass
-                            try:
-                                return ImageFont.load_default(size=size)
-                            except:
-                                return ImageFont.load_default()
+                            tasks.append((f"Lubricante_{clean_h.replace('/', '_').replace(' ', '_')}.png", "[ COMBUSTIBLE / LUBRICANTE ]", clean_h, url_h, "Escanear con celular para registrar ingreso o egreso"))
 
                         # Parallel execution (Ultra Alta Definición 1200x1500 px - Ideal para 15x15cm)
                         def procesar_item(args):
-                            filename, categoria, label, url_target = args
-                            # Descargar QR en alta resolución 1000x1000 px
-                            api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data={urllib.parse.quote(url_target)}"
-                            try:
-                                req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
-                                with urllib.request.urlopen(req) as r_api:
-                                    qr_bytes = r_api.read()
-                                qr_img = Image.open(io.BytesIO(qr_bytes))
-                            except:
-                                qr_img = Image.new('RGB', (1000, 1000), color='white')
-                                
-                            W, H = 1200, 1500
-                            canvas = Image.new('RGB', (W, H), color='white')
-                            draw = ImageDraw.Draw(canvas)
-                            
-                            # Marco exterior sutil de corte
-                            draw.rectangle([(20, 20), (W - 20, H - 20)], outline=(200, 200, 200), width=3)
-                            
-                            # Encabezado superior
-                            font_header = get_hd_font(34)
-                            header_text = "GESTION TECNICA - CONTROL DE PLANTA"
-                            try:
-                                w_h = draw.textlength(header_text, font=font_header)
-                            except:
-                                w_h = len(header_text) * 20
-                            draw.text(((W - w_h) // 2, 50), header_text, fill=(100, 100, 100), font=font_header)
-                            draw.line([(50, 95), (W - 50, 95)], fill=(220, 220, 220), width=2)
-                            
-                            # Pegar código QR en el centro
-                            canvas.paste(qr_img, (100, 120))
-                            
-                            # Línea separadora inferior
-                            draw.line([(50, 1150), (W - 50, 1150)], fill=(220, 220, 220), width=2)
-                            
-                            # Categoría badge superior
-                            font_cat = get_hd_font(28)
-                            try:
-                                w_cat = draw.textlength(categoria, font=font_cat)
-                            except:
-                                w_cat = len(categoria) * 16
-                            draw.text(((W - w_cat) // 2, 1175), categoria, fill=(100, 116, 139), font=font_cat)
-                            
-                            # Denominación principal del equipo / combustible (Fuente Grande y Nítida)
-                            label_upper = label.upper()
-                            font_label = get_hd_font(52)
-                            try:
-                                w_lbl = draw.textlength(label_upper, font=font_label)
-                            except:
-                                w_lbl = len(label_upper) * 30
-                                
-                            # Ajustar si el nombre es muy largo
-                            if w_lbl > 1100:
-                                font_label = get_hd_font(40)
-                                try:
-                                    w_lbl = draw.textlength(label_upper, font=font_label)
-                                except:
-                                    w_lbl = len(label_upper) * 22
-                                    
-                            draw.text(((W - w_lbl) // 2, 1225), label_upper, fill=(15, 23, 42), font=font_label)
-                            
-                            # Subtítulo con instrucciones
-                            sub_text = "Escanear con celular para registrar actividad o control diario"
-                            font_sub = get_hd_font(30)
-                            try:
-                                w_sub = draw.textlength(sub_text, font=font_sub)
-                            except:
-                                w_sub = len(sub_text) * 16
-                            draw.text(((W - w_sub) // 2, 1315), sub_text, fill=(100, 116, 139), font=font_sub)
-                            
-                            out_buf = io.BytesIO()
-                            canvas.save(out_buf, format='PNG')
-                            return filename, out_buf.getvalue()
+                            filename, categoria, label, url_target, sub_msg = args
+                            png_bytes = generar_placa_qr_hd(categoria, label, url_target, sub_msg)
+                            return filename, png_bytes
                             
                         zip_buf = io.BytesIO()
                         with zipfile.ZipFile(zip_buf, 'w') as zip_file:
