@@ -2243,12 +2243,32 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                     badge_prio = "badge-revision" if "Alta" in prio_val else ("badge-mantenimiento" if "Media" in prio_val else "badge-operativo")
                     badge_est = "badge-mantenimiento" if estado_val == "En Ejecución" else "badge-operativo"
                     
+                    def parse_safe_float(val, default=0.0):
+                        if val is None or pd.isna(val):
+                            return default
+                        try:
+                            clean_v = str(val).replace('KM', '').replace('km', '').replace('hs', '').replace(',', '.').strip()
+                            return float(clean_v)
+                        except:
+                            return default
+
+                    def parse_safe_date(val):
+                        if val is None or pd.isna(val):
+                            return datetime.now().date()
+                        try:
+                            return pd.to_datetime(val).date()
+                        except:
+                            return datetime.now().date()
+
                     with st.container(border=True):
                         c_t1, c_t2 = st.columns([3, 1])
                         with c_t1:
                             st.markdown(f"### 🚜 **{row['Maquina']}** — {row['Tarea']}")
                             st.markdown(f"<span class='{badge_prio}'>{prio_val}</span> &nbsp; <span class='badge-operativo'>🛠️ {tipo_val}</span> &nbsp; <span class='{badge_est}'>📌 Estado: {estado_val}</span>", unsafe_allow_html=True)
-                            st.caption(f"📅 Fecha Prevista: **{formatear_fecha_visible(row['Fecha_Prog'])}** | 👤 Asignado: **{row['Tecnico'] if row['Tecnico'] else 'Sin asignar'}** | ⏱️ Horímetro Objetivo: **{row['Horimetro_Est'] if pd.notna(row['Horimetro_Est']) and float(row['Horimetro_Est']) > 0 else 'N/A'}**")
+                            
+                            horim_txt = str(row['Horimetro_Est']).strip() if pd.notna(row['Horimetro_Est']) and str(row['Horimetro_Est']).strip() not in ['', '0', '0.0', 'nan', 'None'] else 'N/A'
+                            tech_txt = str(row['Tecnico']).strip() if pd.notna(row['Tecnico']) and str(row['Tecnico']).strip() not in ['', 'nan', 'None'] else 'Sin asignar'
+                            st.caption(f"📅 Fecha Prevista: **{formatear_fecha_visible(row['Fecha_Prog'])}** | 👤 Asignado: **{tech_txt}** | ⏱️ Horímetro Objetivo: **{horim_txt}**")
                             if pd.notna(row['Detalle']) and str(row['Detalle']).strip():
                                 st.write(f"📝 **Detalle & Repuestos:** {row['Detalle']}")
                         
@@ -2269,7 +2289,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                     ed_tarea = st.text_input("Título / Tarea", value=str(row['Tarea']))
                                     ed_tipo = st.selectbox("Tipo", ["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"], index=["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"].index(tipo_val) if tipo_val in ["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"] else 0)
                                     ed_prio = st.selectbox("Prioridad", ["🔴 Alta / Crítica", "🟡 Media / Rutina", "🟢 Baja / Mejora"], index=["🔴 Alta / Crítica", "🟡 Media / Rutina", "🟢 Baja / Mejora"].index(prio_val) if prio_val in ["🔴 Alta / Crítica", "🟡 Media / Rutina", "🟢 Baja / Mejora"] else 1)
-                                    ed_fecha = st.date_input("Fecha Prevista", value=pd.to_datetime(row['Fecha_Prog']).date() if pd.notna(row['Fecha_Prog']) else datetime.now().date(), format="DD/MM/YYYY")
+                                    ed_fecha = st.date_input("Fecha Prevista", value=parse_safe_date(row['Fecha_Prog']), format="DD/MM/YYYY")
                                     ed_tech = st.selectbox("Técnico Asignado", empleados_list, index=empleados_list.index(row['Tecnico']) if row['Tecnico'] in empleados_list else 0)
                                     ed_det = st.text_area("Detalle & Repuestos", value=str(row['Detalle']) if pd.notna(row['Detalle']) else "")
                                     
@@ -2307,7 +2327,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                                     cursor.execute("""
                                     INSERT INTO mantenimientos (Fecha, Maquina, Operario, Tipo, Inicio, Fin, Horimetro, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (fecha_hoy, row['Maquina'], tech_realizo, "Preventivo" if "Preventivo" in tipo_val else "Correctivo", "08:00", "1.0 hs", float(row['Horimetro_Est']) if pd.notna(row['Horimetro_Est']) else 0.0, det_auto, "Depósito Baigorria", fecha_c, "Ejecutado desde Planificación PCM.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
+                                    """, (fecha_hoy, row['Maquina'], tech_realizo, "Preventivo" if "Preventivo" in tipo_val else "Correctivo", "08:00", "1.0 hs", parse_safe_float(row['Horimetro_Est']), det_auto, "Depósito Baigorria", fecha_c, "Ejecutado desde Planificación PCM.", st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))))
                                     guardar_cambios_db(conn)
                                     st.success("¡OT completada y registrada en el historial!")
                                     st.rerun()
@@ -2324,9 +2344,18 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
     # --- PESTAÑA 2: PLANIFICAR NUEVA ORDEN DE TRABAJO (OT) ---
     with tab_nueva_ot:
         st.markdown("##### ➕ Formulario de Planificación Técnica (PCM)")
-        with st.form("form_nueva_ot_pcm"):
+        if "pcm_form_counter" not in st.session_state:
+            st.session_state["pcm_form_counter"] = 0
+        if "pcm_success_msg" not in st.session_state:
+            st.session_state["pcm_success_msg"] = None
+
+        if st.session_state["pcm_success_msg"]:
+            st.success(st.session_state["pcm_success_msg"])
+            st.session_state["pcm_success_msg"] = None
+
+        with st.form(f"form_nueva_ot_pcm_{st.session_state['pcm_form_counter']}"):
             c_p1, c_p2 = st.columns(2)
-            maq_ot = c_p1.selectbox("Máquina / Activo Destino", maquinas_list, placeholder="Escriba para buscar equipo...")
+            maq_ot = c_p1.selectbox("Máquina / Activo Destino", maquinas_list, index=None, placeholder="Escriba para buscar equipo...")
             tipo_ot = c_p2.selectbox("Tipo de Intervención", ["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"])
             
             c_p3, c_p4 = st.columns(2)
@@ -2340,7 +2369,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
             tarea_ot = st.text_input("Título de la Tarea / OT", placeholder="Ej: Cambio de aceite de motor y filtros 500 hrs")
             detalle_ot = st.text_area("Descripción detallada del Trabajo & Repuestos Previstos", placeholder="Ej: Traer 20L de aceite Shell Rimula 15W40, filtro de aceite W950 y filtro de combustible...")
             
-            btn_guardar_ot = st.form_submit_button("📅 Programar Orden de Trabajo")
+            btn_guardar_ot = st.form_submit_button("📅 Programar Orden de Trabajo", use_container_width=True)
             
             if btn_guardar_ot:
                 if not maq_ot:
@@ -2353,9 +2382,10 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
                     cursor.execute("""
                     INSERT INTO planificacion (Maquina, Tarea, Fecha_Prog, Estado, Fecha_Fin, Tecnico, Tipo, Prioridad, Detalle, Horimetro_Est)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (maq_ot, tarea_ot.strip(), fecha_prog_ot.strftime("%Y-%m-%d"), "Pendiente", "", tech_asig_ot, tipo_ot, prio_ot, detalle_ot.strip(), horim_est_ot))
+                    """, (maq_ot, tarea_ot.strip(), fecha_prog_ot.strftime("%Y-%m-%d"), "Pendiente", "", tech_asig_ot if tech_asig_ot else "Sin asignar", tipo_ot, prio_ot, detalle_ot.strip(), horim_est_ot))
                     guardar_cambios_db(conn)
-                    st.success(f"🎉 Orden de Trabajo programada con éxito para {maq_ot}.")
+                    st.session_state["pcm_form_counter"] += 1
+                    st.session_state["pcm_success_msg"] = f"🎉 Orden de Trabajo programada con éxito para '{maq_ot}'. El formulario se ha limpiado para la próxima carga."
                     st.rerun()
 
     # --- PESTAÑA 3: HISTORIAL DE CUMPLIMIENTO ---
