@@ -1356,8 +1356,8 @@ def mostrar_registro_hidro_qr(prod_pre=None):
     
     # Cargar hidrocarburos y lubricantes dinámicamente de productos usando palabras clave
     all_products_db = cargar_lista_columna("productos", "Nombre")
-    hidro_keywords_db = ["gas-oil", "gas oil", "gasoil", "aceite", "grasa", "hidráulico", "hidraulico", "lubricante"]
-    hidro_list_db = [p for p in all_products_db if any(k in p.lower() for k in hidro_keywords_db)]
+    hidro_keywords_db = ["gas-oil", "gas oil", "gasoil", "aceite", "grasa", "hidráulico", "hidraulico", "lubricante", "hidrocarburo", "hidro", "combustible"]
+    hidro_list_db = list(dict.fromkeys([p for p in all_products_db if any(k in p.lower() for k in hidro_keywords_db)]))
     for default_h in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]:
         if default_h not in hidro_list_db:
             hidro_list_db.append(default_h)
@@ -1433,10 +1433,10 @@ empleados_list = cargar_lista_columna("empleados", "Nombre")
 
 # Cargar todos los productos y clasificarlos según palabras clave para evitar hardcoding
 all_products = cargar_lista_columna("productos", "Nombre")
-hidro_keywords = ["gas-oil", "gas oil", "gasoil", "aceite", "grasa", "hidráulico", "hidraulico", "lubricante"]
+hidro_keywords = ["gas-oil", "gas oil", "gasoil", "aceite", "grasa", "hidráulico", "hidraulico", "lubricante", "hidrocarburo", "hidro", "combustible"]
 
-# Filtrar combustibles y lubricantes
-hidro_list = [p for p in all_products if any(k in p.lower() for k in hidro_keywords)]
+# Filtrar combustibles y lubricantes (únicos, manteniendo orden)
+hidro_list = list(dict.fromkeys([p for p in all_products if any(k in p.lower() for k in hidro_keywords)]))
 for default_h in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]:
     if default_h not in hidro_list:
         hidro_list.append(default_h)
