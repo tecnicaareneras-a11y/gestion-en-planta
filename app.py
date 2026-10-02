@@ -7,6 +7,7 @@ from io import BytesIO
 import io
 import socket
 import urllib.parse
+import threading
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Gestión de Planta", layout="wide")
@@ -437,19 +438,42 @@ def buscar_coincidencia_empleado(usuario, lista_empleados):
 
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gestion_planta.db")
 
-# --- CONEXIÓN Y CREACIÓN DE TABLAS SQLITE ---
+# --- CONEXIÓN Y CREACIÓN DE TABLAS SQLITE DE ALTO RENDIMIENTO ---
 def get_connection():
-    # timeout=20.0 evita errores de bloqueo en escrituras concurrentes
-    return sqlite3.connect(DB_FILE, timeout=20.0)
+    # timeout=30.0 y optimizaciones SQLite WAL para ultra velocidad y soporte de alta concurrencia
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA cache_size = -64000")  # 64MB de cache en RAM
+        conn.execute("PRAGMA temp_store = MEMORY")
+    except Exception:
+        pass
+    return conn
+
+def _sync_gdrive_background():
+    try:
+        # Checkpoint WAL para asegurar que el archivo gestion_planta.db esté sincronizado en disco antes de subir
+        try:
+            chk = sqlite3.connect(DB_FILE, timeout=5.0)
+            chk.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            chk.close()
+        except Exception:
+            pass
+        import gdrive_sync
+        gdrive_sync.subir_db_a_gdrive()
+    except Exception as e:
+        print(f"Error sincronizando con Google Drive en segundo plano: {e}")
 
 def guardar_cambios_db(conn):
     conn.commit()
     conn.close()
     try:
-        import gdrive_sync
-        gdrive_sync.subir_db_a_gdrive()
-    except Exception as e:
-        print(f"Error sincronizando con Google Drive: {e}")
+        st.cache_data.clear()
+    except Exception:
+        pass
+    # Subir a Google Drive en segundo plano asíncrono para que el usuario no espere y la app no se congele
+    threading.Thread(target=_sync_gdrive_background, daemon=True).start()
 
 def verificar_password_usuario(usuario_actual, password_ingresado):
     if not password_ingresado or not str(password_ingresado).strip():
@@ -676,6 +700,17 @@ def init_db():
     cursor.execute("UPDATE hidrocarburos SET HistorialModificaciones = 'Carga inicial o importación.' WHERE HistorialModificaciones IS NULL")
     cursor.execute("UPDATE hidrocarburos SET CreadoPor = 'Desconocido' WHERE CreadoPor IS NULL")
     
+    # Índices de alto rendimiento para acelerar consultas y soportar decenas de miles de registros
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_mantenimientos_fecha ON mantenimientos(Fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_mantenimientos_maquina ON mantenimientos(Maquina)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_mantenimientos_operario ON mantenimientos(Operario)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hidrocarburos_fecha ON hidrocarburos(Fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hidrocarburos_prod ON hidrocarburos(Producto)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hidrocarburos_val ON hidrocarburos(Estado_Validacion)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_producto ON stock(Producto)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_controles_fecha ON controles_diarios(Fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_planificacion_maquina ON planificacion(Maquina)")
+    
     conn.commit()
     
     # --- MIGRACIÓN AUTOMÁTICA DE CSV EXISTENTES A SQLITE ---
@@ -751,8 +786,10 @@ if "session_db_synced" not in st.session_state:
     descargar_db_desde_nube()
     st.session_state["session_db_synced"] = True
 
-# Inicializar Base de Datos al arrancar la app y migrar datos antiguos
-init_db()
+# Inicializar Base de Datos al arrancar la app y migrar datos antiguos (sólo una vez por sesión para máxima agilidad)
+if "db_initialized" not in st.session_state:
+    init_db()
+    st.session_state["db_initialized"] = True
 
 # --- EVALUAR AUTENTICACIÓN ---
 if "usuario" not in st.session_state:
@@ -932,13 +969,15 @@ if not st.session_state["usuario"]:
         st.info("💡 Credencial de fábrica: Usuario 'admin' y Contraseña 'admin'. Recomendamos cambiarla en la sección de Configuración.")
     st.stop()
 
-# --- FUNCIONES DE BASE DE DATOS ---
+# --- FUNCIONES DE BASE DE DATOS CON CACHÉ DE ALTO RENDIMIENTO ---
+@st.cache_data(ttl=60, show_spinner=False)
 def cargar_datos_db(tabla):
     conn = get_connection()
     df = pd.read_sql_query(f"SELECT * FROM {tabla}", conn)
     conn.close()
     return df.fillna("")
 
+@st.cache_data(ttl=60, show_spinner=False)
 def cargar_lista_columna(tabla, columna):
     conn = get_connection()
     try:
@@ -1517,7 +1556,8 @@ st.sidebar.write(f"👤 Sesión: **{nombre_mostrado}**")
 # --- INDICADOR DE SINCRONIZACIÓN DE GOOGLE DRIVE ---
 try:
     import gdrive_sync
-    sync_info = descargar_db_desde_nube()
+    # Usar estado en memoria para respuesta instantánea (evita descargar la base en cada clic o recarga)
+    sync_info = gdrive_sync.LAST_SYNC
     upload_info = gdrive_sync.LAST_SYNC
     with st.sidebar.expander("☁️ Estado de Nube Google Drive", expanded=True):
         if sync_info["status"] == "OK":
@@ -1541,6 +1581,10 @@ try:
         if st.button("🔄 Sincronizar Ahora", use_container_width=True, key="btn_sync_gdrive_now"):
             with st.spinner("Sincronizando con Google Drive..."):
                 gdrive_sync.descargar_db_desde_gdrive()
+                try:
+                    st.cache_data.clear()
+                except Exception:
+                    pass
             st.rerun()
 except Exception as e:
     st.sidebar.error(f"Error cargando módulo de sync: {e}")
