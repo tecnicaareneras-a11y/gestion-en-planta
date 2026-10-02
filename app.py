@@ -633,6 +633,18 @@ def init_db():
         cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN HistorialModificaciones TEXT")
     if "CreadoPor" not in columnas_hd:
         cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN CreadoPor TEXT")
+    if "Proveedor" not in columnas_hd:
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Proveedor TEXT DEFAULT ''")
+    if "Nro_Factura" not in columnas_hd:
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Nro_Factura TEXT DEFAULT ''")
+    if "Importe" not in columnas_hd:
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Importe REAL DEFAULT 0.0")
+    if "Estado_Validacion" not in columnas_hd:
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Estado_Validacion TEXT DEFAULT 'Validado'")
+    if "Fecha_Validacion" not in columnas_hd:
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Fecha_Validacion TEXT DEFAULT ''")
+    if "Validado_Por" not in columnas_hd:
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Validado_Por TEXT DEFAULT ''")
         
     # Asegurar que existan las nuevas columnas en controles_diarios si ya existe la tabla
     cursor.execute("PRAGMA table_info(controles_diarios)")
@@ -1394,12 +1406,16 @@ def mostrar_registro_hidro_qr(prod_pre=None):
                 fecha_creacion_hd = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 usr_hd = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 hist_hd = f"{fecha_creacion_hd} - Registrado por usuario: {usr_hd} (Vía QR)"
+                est_val = "Pendiente Factura" if movimiento == "Ingreso" else "Validado"
                 cursor.execute("""
-                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (fecha_mov.strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd))
+                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor, Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (fecha_mov.strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd, "", "", 0.0, est_val, "", ""))
                 guardar_cambios_db(conn)
-                st.success("🎉 ¡Control de Hidrocarburos guardado con éxito!")
+                if movimiento == "Ingreso":
+                    st.success("🎉 ¡Ingreso de Hidrocarburos guardado con éxito! Se notificó a Administración para la vinculación de la factura/remito.")
+                else:
+                    st.success("🎉 ¡Egreso de Hidrocarburos guardado con éxito!")
                 st.balloons()
                 st.info("Ya puede continuar cargando o cerrar la ventana en su teléfono.")
 
@@ -1474,6 +1490,23 @@ else:
         "⚙️ Datos Maestros & Gestión QR",
         "📥 Exportación Global de Datos"
     ]
+# Consulta de Alertas de Facturación Pendiente en Hidrocarburos
+conn_sb = get_connection()
+cursor_sb = conn_sb.cursor()
+try:
+    cursor_sb.execute("SELECT COUNT(*) FROM hidrocarburos WHERE Movimiento = 'Ingreso' AND (Estado_Validacion = 'Pendiente Factura' OR Estado_Validacion IS NULL OR Estado_Validacion = '')")
+    cnt_facturas_pendientes = cursor_sb.fetchone()[0]
+except:
+    cnt_facturas_pendientes = 0
+conn_sb.close()
+
+if cnt_facturas_pendientes > 0:
+    st.sidebar.markdown(f"""
+    <div style='background: linear-gradient(135deg, rgba(180, 83, 9, 0.4), rgba(120, 53, 15, 0.5)); border: 1.5px solid #F59E0B; border-radius: 8px; padding: 10px; margin-bottom: 12px;'>
+        <div style='color: #FBBF24; font-weight: bold; font-size: 13px;'>🔔 ALERTA DE FACTURACIÓN ({cnt_facturas_pendientes})</div>
+        <div style='color: #E2E8F0; font-size: 11.5px; margin-top: 3px;'>Hay <b>{cnt_facturas_pendientes} ingreso(s)</b> de combustible en planta pendientes de cargar factura/remito.</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 menu = st.sidebar.radio("Menú:", opciones_menu)
 
@@ -2637,6 +2670,15 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
         usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
         indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
         oper_h = st.selectbox("Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar responsable...")
+        
+        st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+        st.markdown("###### 🧾 Datos de Factura / Remito (Administración & Proveedores)")
+        c_f1, c_f2, c_f3 = st.columns(3)
+        prov_h = c_f1.text_input("Proveedor", placeholder="Ej: YPF Directo / Distribuidor").strip()
+        nro_fact_h = c_f2.text_input("N° de Factura / Remito", placeholder="Ej: A-0001-00045678").strip()
+        imp_h = c_f3.number_input("Importe Total ($)", min_value=0.0, step=100.0)
+        st.caption("💡 Si es un Ingreso y aún no tienes la factura a mano, déjala en blanco. El sistema registrará los litros en stock y generará una alerta a Administración para completar la factura después.")
+
         if st.form_submit_button("Cargar Registro", use_container_width=True):
             if not prod_h:
                 st.error("⚠️ Por favor selecciona el tipo de hidrocarburo.")
@@ -2644,19 +2686,29 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
                 st.error("⚠️ Por favor selecciona el destino.")
             elif not oper_h:
                 st.error("⚠️ Por favor selecciona el responsable.")
+            elif cant_h <= 0:
+                st.error("⚠️ Por favor ingresa una cantidad de litros mayor a 0.")
             else:
                 conn = get_connection()
                 cursor = conn.cursor()
                 fecha_creacion_hd = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 usr_hd = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 hist_hd = f"{fecha_creacion_hd} - Registrado por usuario: {usr_hd}"
+                
+                est_val = "Validado" if (t_m != "Ingreso" or nro_fact_h != "" or prov_h != "") else "Pendiente Factura"
+                f_val = fecha_creacion_hd if est_val == "Validado" else ""
+                u_val = usr_hd if est_val == "Validado" else ""
+
                 cursor.execute("""
-                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (fecha_h.strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd))
+                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor, Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (fecha_h.strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd, prov_h, nro_fact_h, imp_h, est_val, f_val, u_val))
                 guardar_cambios_db(conn)
                 st.session_state["hidro_form_counter"] += 1
-                st.session_state["hidro_success_msg"] = f"🎉 ¡Movimiento de '{prod_h}' ({cant_h} Litros) registrado con éxito! El panel se ha limpiado para la próxima carga."
+                if t_m == "Ingreso" and est_val == "Pendiente Factura":
+                    st.session_state["hidro_success_msg"] = f"🎉 ¡Ingreso de '{prod_h}' ({cant_h:,.0f} Litros) registrado! Se generó la alerta de 'Pendiente Factura' para Administración."
+                else:
+                    st.session_state["hidro_success_msg"] = f"🎉 ¡Movimiento de '{prod_h}' ({cant_h:,.0f} Litros) registrado con éxito! El panel se ha limpiado para la próxima carga."
                 st.rerun()
 
 # --- 7. BALANCES & REPORTES DE HIDROCARBUROS ---
@@ -2669,219 +2721,341 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
     if df_h.empty:
         st.warning("No se encontraron registros de movimientos de hidrocarburos.")
     else:
-        # Cálculo de Stock Remanente para el encabezado
-        df_h['Aux_Cant'] = df_h.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
-        stock_actual = df_h.groupby('Producto')['Aux_Cant'].sum().reset_index()
-        stock_actual.columns = ['Producto', 'Stock Remanente (Ltrs)']
+        tab_historial_h, tab_validar_h = st.tabs([
+            "📊 Balances & Historial General",
+            f"🧾 Validación de Facturas / Remitos {'⚠️ (' + str(cnt_facturas_pendientes) + ')' if cnt_facturas_pendientes > 0 else '✅ Al Día'}"
+        ])
 
-        # Mostrar Resumen de Stock
-        st.subheader("📦 Resumen de Stock Remanente")
-        stock_actual = stock_actual.fillna("")
-        st.dataframe(stock_actual, use_container_width=True, hide_index=True)
-
-        st.divider()
-
-        # Mostrar Detalle Completo
-        st.subheader("🔍 Historial Detallado")
-        
-        # Parsear fecha a datetime para filtros de mes y año
-        df_h['Fecha_dt'] = pd.to_datetime(df_h['Fecha'], errors='coerce')
-        df_h['Año'] = df_h['Fecha_dt'].dt.year.fillna(0).astype(int)
-        df_h['Mes_num'] = df_h['Fecha_dt'].dt.month.fillna(0).astype(int)
-        
-        nombres_meses = {
-            1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
-            7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
-            0: "Sin fecha"
-        }
-        df_h['Mes'] = df_h['Mes_num'].map(nombres_meses)
-        
-        # Filtros opcionales para facilitar la lectura
-        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-        filtro_prod = col_f1.multiselect("Filtrar por Producto", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], default=["Gas-oil"])
-        filtro_mov = col_f2.selectbox("Movimiento", ["Todos", "Ingreso", "Egreso"])
-        
-        anios_disponibles = sorted([str(y) for y in df_h['Año'].unique() if y > 0], reverse=True)
-        filtro_anio = col_f3.selectbox("Año", ["Todos"] + anios_disponibles)
-        
-        filtro_mes = col_f4.selectbox("Mes", ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"])
-
-        df_mostrar = df_h.copy()
-        if filtro_prod:
-            df_mostrar = df_mostrar[df_mostrar['Producto'].isin(filtro_prod)]
-        if filtro_mov != "Todos":
-            df_mostrar = df_mostrar[df_mostrar['Movimiento'] == filtro_mov]
-        if filtro_anio != "Todos":
-            df_mostrar = df_mostrar[df_mostrar['Año'] == int(filtro_anio)]
-        if filtro_mes != "Todos":
-            df_mostrar = df_mostrar[df_mostrar['Mes'] == filtro_mes]
-
-        # Calcular métricas del período filtrado (Las "otras métricas" solicitadas)
-        ingresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Ingreso"]['Cantidad'].sum()
-        egresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Egreso"]['Cantidad'].sum()
-        balance_periodo = ingresos_periodo - egresos_periodo
-        
-        st.markdown("##### 📊 Balance del Período Filtrado:")
-        cm1, cm2, cm3 = st.columns(3)
-        cm1.metric("Ingresos en Período", f"{ingresos_periodo:,.1f} Lts/Uds")
-        cm2.metric("Consumos en Período", f"{egresos_periodo:,.1f} Lts/Uds")
-        cm3.metric("Balance Período", f"{balance_periodo:,.1f} Lts/Uds", delta=f"{balance_periodo:,.1f}", delta_color="normal" if balance_periodo >= 0 else "inverse")
-        
-        st.divider()
-
-        # Formatear y mostrar la tabla ordenada
-        df_mostrar_sorted = df_mostrar.sort_values(by="Fecha", ascending=False).copy()
-        df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
-        df_mostrar_sorted = df_mostrar_sorted.fillna("")
-
-        # Selector directo sobre la lista de registros
-        st.markdown("##### 🔍 Historial de Movimientos")
-        opciones_editar_h = ["-- Ver Tabla Completa --"] + [f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts) | {r['Destino']}" for _, r in df_mostrar.sort_values(by='id', ascending=False).iterrows()]
-        registro_a_editar_h = st.selectbox("✏️ Seleccioná un registro de la lista para editarlo o eliminarlo:", opciones_editar_h, key="sel_hidro_direct")
-        
-        if registro_a_editar_h != "-- Ver Tabla Completa --":
-            db_id_h = int(registro_a_editar_h.split(" | ")[0].replace("ID ", ""))
-            row_h = df_h[df_h['id'] == db_id_h].iloc[0]
+        with tab_validar_h:
+            st.subheader("🧾 Validación y Asignación de Facturas / Remitos")
+            st.caption("Esta sección permite a Administración vincular las facturas y comprobantes a las descargas físicas de combustible ingresadas por los operarios en planta, evitando cargas duplicadas.")
             
-            with st.container(border=True):
-                st.subheader(f"✏️ Editar / 🗑️ Eliminar Movimiento #{db_id_h}")
-                creador_h = row_h.get('CreadoPor') if pd.notna(row_h.get('CreadoPor')) and str(row_h.get('CreadoPor')).strip() != "" else "Desconocido"
-                fecha_crea_h = formatear_fecha_hora_visible(row_h.get('FechaCreacion')) if pd.notna(row_h.get('FechaCreacion')) and str(row_h.get('FechaCreacion')).strip() != "" else "N/A"
-                st.info(f"👤 **Primera Carga por:** {creador_h} | 📅 **Fecha/Hora de Carga:** {fecha_crea_h}")
+            df_pendientes = df_h[df_h['Movimiento'] == "Ingreso"].copy()
+            if not df_pendientes.empty:
+                df_pendientes = df_pendientes[
+                    df_pendientes['Estado_Validacion'].isin(["Pendiente Factura", "", None]) | 
+                    df_pendientes['Estado_Validacion'].isna()
+                ].copy()
+            
+            c_k1, c_k2, c_k3 = st.columns(3)
+            total_ing_pend = len(df_pendientes) if not df_pendientes.empty else 0
+            litros_pend = df_pendientes['Cantidad'].sum() if not df_pendientes.empty else 0.0
+            
+            df_validados = df_h[(df_h['Movimiento'] == "Ingreso") & (df_h['Estado_Validacion'] == "Validado")].copy()
+            total_ing_val = len(df_validados) if not df_validados.empty else 0
+            litros_val = df_validados['Cantidad'].sum() if not df_validados.empty else 0.0
+            
+            c_k1.metric("Ingresos Pendientes ⚠️", f"{total_ing_pend} cargas", delta=f"{litros_pend:,.0f} Lts", delta_color="inverse" if total_ing_pend > 0 else "normal")
+            c_k2.metric("Ingresos Validados ✅", f"{total_ing_val} facturas", f"{litros_val:,.0f} Lts")
+            c_k3.metric("Tasa de Validación", f"{(total_ing_val / (total_ing_val + total_ing_pend) * 100) if (total_ing_val + total_ing_pend) > 0 else 100:.1f}%")
+            
+            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+            
+            if df_pendientes.empty:
+                st.success("🟢 **¡Excelente! No hay ingresos pendientes de factura.** Todas las recepciones físicas de combustible en planta cuentan con su comprobante cargado.")
+            else:
+                st.warning(f"⚠️ **Atención:** Hay **{total_ing_pend} recepción(es) de combustible** ingresadas en planta que aún no tienen cargada la factura o remito. Completa los datos a continuación para validar cada carga y apagar la señal de alerta:")
+                
+                for _, r_pend in df_pendientes.sort_values(by="id", ascending=False).iterrows():
+                    p_id = r_pend['id']
+                    with st.container(border=True):
+                        cp1, cp2 = st.columns([2.8, 1.2])
+                        with cp1:
+                            st.markdown(f"### ⛽ **{r_pend['Producto']}** — **{r_pend['Cantidad']:,.0f} Litros**")
+                            st.markdown(f"<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span> &nbsp; <span class='badge-operativo'>📍 Destino: {r_pend['Destino']}</span>", unsafe_allow_html=True)
+                            f_vis = formatear_fecha_visible(r_pend['Fecha'])
+                            op_vis = r_pend['Operario'] if pd.notna(r_pend['Operario']) and str(r_pend['Operario']).strip() else 'No especificado'
+                            crea_vis = r_pend.get('CreadoPor', 'Desconocido')
+                            f_crea_vis = formatear_fecha_hora_visible(r_pend.get('FechaCreacion', ''))
+                            st.caption(f"📅 **Fecha Recepción:** {f_vis} | 👤 **Recibió en Planta:** {op_vis} | ⏱️ **Cargado por:** {crea_vis} ({f_crea_vis})")
+                        
+                        with cp2:
+                            with st.popover("📝 Cargar Factura y Validar", use_container_width=True):
+                                st.markdown(f"##### 🧾 Vincular Comprobante a Ingreso #{p_id}")
+                                st.write(f"**{r_pend['Producto']}** — {r_pend['Cantidad']:,.0f} Lts ({f_vis})")
+                                with st.form(f"form_val_ing_{p_id}"):
+                                    val_prov = st.text_input("Proveedor", placeholder="Ej: YPF Directo / Axion / Distribuidor").strip()
+                                    val_fact = st.text_input("N° de Factura / Remito", placeholder="Ej: A-0001-00045678").strip()
+                                    val_imp = st.number_input("Importe Total ($)", min_value=0.0, step=100.0)
+                                    if val_imp > 0 and float(r_pend['Cantidad']) > 0:
+                                        st.caption(f"💵 Precio unitario estimado: **${val_imp / float(r_pend['Cantidad']):.2f} / Litro**")
+                                    val_obs = st.text_input("Observaciones / Notas adicionales (opcional)", placeholder="Ej: Factura cancelada, orden de compra 402")
+                                    
+                                    btn_sub_val = st.form_submit_button("💾 Confirmar y Validar Ingreso", use_container_width=True)
+                                    if btn_sub_val:
+                                        if not val_prov and not val_fact:
+                                            st.error("⚠️ Por favor ingresa al menos el proveedor o el número de factura/remito.")
+                                        else:
+                                            conn_v = get_connection()
+                                            cur_v = conn_v.cursor()
+                                            now_str_v = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            usr_v = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Administración"))
+                                            
+                                            log_v = f"{now_str_v} - Factura validada por {usr_v}: Prov '{val_prov}', Fact '{val_fact}', Imp ${val_imp:,.2f}"
+                                            if val_obs:
+                                                log_v += f" | Obs: {val_obs}"
+                                            hist_prev_v = str(r_pend.get('HistorialModificaciones', '')) if pd.notna(r_pend.get('HistorialModificaciones')) else ""
+                                            hist_new_v = (hist_prev_v + "\n" + log_v).strip()
+                                            
+                                            cur_v.execute("""
+                                            UPDATE hidrocarburos SET
+                                                Proveedor = ?,
+                                                Nro_Factura = ?,
+                                                Importe = ?,
+                                                Estado_Validacion = 'Validado',
+                                                Fecha_Validacion = ?,
+                                                Validado_Por = ?,
+                                                HistorialModificaciones = ?
+                                            WHERE id = ?
+                                            """, (val_prov, val_fact, val_imp, now_str_v, usr_v, hist_new_v, p_id))
+                                            guardar_cambios_db(conn_v)
+                                            st.success("🎉 ¡Ingreso validado con éxito! La alerta se ha apagado.")
+                                            st.rerun()
 
-                historial_hd = str(row_h.get('HistorialModificaciones', '')).strip() if pd.notna(row_h.get('HistorialModificaciones')) else ""
-                if historial_hd:
-                    with st.expander("📜 Historial de Modificaciones y Auditoría"):
-                        st.text(historial_hd)
+        with tab_historial_h:
+            # Cálculo de Stock Remanente para el encabezado
+            df_h['Aux_Cant'] = df_h.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
+            stock_actual = df_h.groupby('Producto')['Aux_Cant'].sum().reset_index()
+            stock_actual.columns = ['Producto', 'Stock Remanente (Ltrs)']
 
-                with st.form(f"form_edit_hidro_{db_id_h}"):
-                    c_edh1, c_edh2 = st.columns(2)
-                    edit_fecha_h = c_edh1.date_input("Fecha", pd.to_datetime(row_h['Fecha']).date(), format="DD/MM/YYYY")
-                    edit_prod_h = c_edh1.selectbox("Tipo de Hidrocarburo", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], 
-                                                   index=["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"].index(row_h['Producto']) if row_h['Producto'] in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"] else 0)
-                    edit_mov_h = c_edh2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row_h['Movimiento'] == "Ingreso" else 1)
-                    edit_cant_h = c_edh2.number_input("Cantidad (Litros)", value=float(row_h['Cantidad']), min_value=0.0)
-                    
-                    edit_dest_h = st.selectbox("Destino", ["Stock Central"] + maquinas_list, 
-                                               index=(["Stock Central"] + maquinas_list).index(row_h['Destino']) if row_h['Destino'] in (["Stock Central"] + maquinas_list) else 0)
-                    edit_oper_h = st.selectbox("Responsable", ["-- Sin especificar --"] + empleados_list, 
-                                               index=(["-- Sin especificar --"] + empleados_list).index(row_h['Operario']) if row_h['Operario'] in (["-- Sin especificar --"] + empleados_list) else 0)
-                    
-                    pass_hidro = st.text_input("🔑 Contraseña para confirmar cambio o eliminación", type="password")
+            # Mostrar Resumen de Stock
+            st.subheader("📦 Resumen de Stock Remanente")
+            stock_actual = stock_actual.fillna("")
+            st.dataframe(stock_actual, use_container_width=True, hide_index=True)
 
-                    col_bh1, col_bh2 = st.columns(2)
-                    btn_save_h = col_bh1.form_submit_button("💾 Guardar Cambios", use_container_width=True)
-                    btn_delete_h = col_bh2.form_submit_button("🗑️ Eliminar Registro", use_container_width=True)
+            st.divider()
+
+            # Mostrar Detalle Completo
+            st.subheader("🔍 Historial Detallado")
+        
+            # Parsear fecha a datetime para filtros de mes y año
+            df_h['Fecha_dt'] = pd.to_datetime(df_h['Fecha'], errors='coerce')
+            df_h['Año'] = df_h['Fecha_dt'].dt.year.fillna(0).astype(int)
+            df_h['Mes_num'] = df_h['Fecha_dt'].dt.month.fillna(0).astype(int)
+        
+            nombres_meses = {
+                1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+                7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
+                0: "Sin fecha"
+            }
+            df_h['Mes'] = df_h['Mes_num'].map(nombres_meses)
+        
+            # Filtros opcionales para facilitar la lectura
+            col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+            filtro_prod = col_f1.multiselect("Filtrar por Producto", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], default=["Gas-oil"])
+            filtro_mov = col_f2.selectbox("Movimiento", ["Todos", "Ingreso", "Egreso"])
+        
+            anios_disponibles = sorted([str(y) for y in df_h['Año'].unique() if y > 0], reverse=True)
+            filtro_anio = col_f3.selectbox("Año", ["Todos"] + anios_disponibles)
+        
+            filtro_mes = col_f4.selectbox("Mes", ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"])
+
+            df_mostrar = df_h.copy()
+            if filtro_prod:
+                df_mostrar = df_mostrar[df_mostrar['Producto'].isin(filtro_prod)]
+            if filtro_mov != "Todos":
+                df_mostrar = df_mostrar[df_mostrar['Movimiento'] == filtro_mov]
+            if filtro_anio != "Todos":
+                df_mostrar = df_mostrar[df_mostrar['Año'] == int(filtro_anio)]
+            if filtro_mes != "Todos":
+                df_mostrar = df_mostrar[df_mostrar['Mes'] == filtro_mes]
+
+            # Calcular métricas del período filtrado (Las "otras métricas" solicitadas)
+            ingresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Ingreso"]['Cantidad'].sum()
+            egresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Egreso"]['Cantidad'].sum()
+            balance_periodo = ingresos_periodo - egresos_periodo
+        
+            st.markdown("##### 📊 Balance del Período Filtrado:")
+            cm1, cm2, cm3 = st.columns(3)
+            cm1.metric("Ingresos en Período", f"{ingresos_periodo:,.1f} Lts/Uds")
+            cm2.metric("Consumos en Período", f"{egresos_periodo:,.1f} Lts/Uds")
+            cm3.metric("Balance Período", f"{balance_periodo:,.1f} Lts/Uds", delta=f"{balance_periodo:,.1f}", delta_color="normal" if balance_periodo >= 0 else "inverse")
+        
+            st.divider()
+
+            # Asegurar columnas si faltan
+            for col_extra in ["Proveedor", "Nro_Factura", "Importe", "Estado_Validacion"]:
+                if col_extra not in df_mostrar.columns:
+                    df_mostrar[col_extra] = "" if col_extra != "Importe" else 0.0
+
+            # Formatear y mostrar la tabla ordenada
+            df_mostrar_sorted = df_mostrar.sort_values(by="Fecha", ascending=False).copy()
+            df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
+            df_mostrar_sorted = df_mostrar_sorted.fillna("")
+
+            # Selector directo sobre la lista de registros
+            st.markdown("##### 🔍 Historial de Movimientos")
+            opciones_editar_h = ["-- Ver Tabla Completa --"] + [f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts) | {r['Destino']}" for _, r in df_mostrar.sort_values(by='id', ascending=False).iterrows()]
+            registro_a_editar_h = st.selectbox("✏️ Seleccioná un registro de la lista para editarlo o eliminarlo:", opciones_editar_h, key="sel_hidro_direct")
+        
+            if registro_a_editar_h != "-- Ver Tabla Completa --":
+                db_id_h = int(registro_a_editar_h.split(" | ")[0].replace("ID ", ""))
+                row_h = df_h[df_h['id'] == db_id_h].iloc[0]
+            
+                with st.container(border=True):
+                    st.subheader(f"✏️ Editar / 🗑️ Eliminar Movimiento #{db_id_h}")
+                    creador_h = row_h.get('CreadoPor') if pd.notna(row_h.get('CreadoPor')) and str(row_h.get('CreadoPor')).strip() != "" else "Desconocido"
+                    fecha_crea_h = formatear_fecha_hora_visible(row_h.get('FechaCreacion')) if pd.notna(row_h.get('FechaCreacion')) and str(row_h.get('FechaCreacion')).strip() != "" else "N/A"
+                    st.info(f"👤 **Primera Carga por:** {creador_h} | 📅 **Fecha/Hora de Carga:** {fecha_crea_h}")
+
+                    historial_hd = str(row_h.get('HistorialModificaciones', '')).strip() if pd.notna(row_h.get('HistorialModificaciones')) else ""
+                    if historial_hd:
+                        with st.expander("📜 Historial de Modificaciones y Auditoría"):
+                            st.text(historial_hd)
+
+                    with st.form(f"form_edit_hidro_{db_id_h}"):
+                        c_edh1, c_edh2 = st.columns(2)
+                        edit_fecha_h = c_edh1.date_input("Fecha", pd.to_datetime(row_h['Fecha']).date(), format="DD/MM/YYYY")
+                        edit_prod_h = c_edh1.selectbox("Tipo de Hidrocarburo", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], 
+                                                       index=["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"].index(row_h['Producto']) if row_h['Producto'] in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"] else 0)
+                        edit_mov_h = c_edh2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if row_h['Movimiento'] == "Ingreso" else 1)
+                        edit_cant_h = c_edh2.number_input("Cantidad (Litros)", value=float(row_h['Cantidad']), min_value=0.0)
                     
-                    if btn_save_h:
-                        usr_act = st.session_state.get("usuario", "")
-                        if not verificar_password_usuario(usr_act, pass_hidro):
-                            st.error("🔒 Contraseña incorrecta o no ingresada. No se guardaron los cambios.")
-                        else:
-                            cambios_h = []
-                            if str(row_h['Fecha']) != edit_fecha_h.strftime("%Y-%m-%d"):
-                                cambios_h.append(f"Fecha: '{row_h['Fecha']}' -> '{edit_fecha_h.strftime('%Y-%m-%d')}'")
-                            if str(row_h['Producto']) != str(edit_prod_h):
-                                cambios_h.append(f"Producto: '{row_h['Producto']}' -> '{edit_prod_h}'")
-                            if str(row_h['Movimiento']) != str(edit_mov_h):
-                                cambios_h.append(f"Movimiento: '{row_h['Movimiento']}' -> '{edit_mov_h}'")
-                            if float(row_h['Cantidad']) != float(edit_cant_h):
-                                cambios_h.append(f"Cantidad: {row_h['Cantidad']} -> {edit_cant_h}")
-                            if str(row_h['Destino']) != str(edit_dest_h):
-                                cambios_h.append(f"Destino: '{row_h['Destino']}' -> '{edit_dest_h}'")
-                            op_val = "" if edit_oper_h == "-- Sin especificar --" else edit_oper_h
-                            if str(row_h['Operario']) != str(op_val):
-                                cambios_h.append(f"Responsable: '{row_h['Operario']}' -> '{op_val}'")
+                        edit_dest_h = st.selectbox("Destino", ["Stock Central"] + maquinas_list, 
+                                                   index=(["Stock Central"] + maquinas_list).index(row_h['Destino']) if row_h['Destino'] in (["Stock Central"] + maquinas_list) else 0)
+                        edit_oper_h = st.selectbox("Responsable", ["-- Sin especificar --"] + empleados_list, 
+                                                   index=(["-- Sin especificar --"] + empleados_list).index(row_h['Operario']) if row_h['Operario'] in (["-- Sin especificar --"] + empleados_list) else 0)
+                    
+                        st.markdown("###### 🧾 Factura / Remito:")
+                        c_edf1, c_edf2, c_edf3 = st.columns(3)
+                        edit_prov_h = c_edf1.text_input("Proveedor", value=str(row_h.get('Proveedor', '')) if pd.notna(row_h.get('Proveedor')) else "")
+                        edit_fact_h = c_edf2.text_input("N° Factura/Remito", value=str(row_h.get('Nro_Factura', '')) if pd.notna(row_h.get('Nro_Factura')) else "")
+                        edit_imp_h = c_edf3.number_input("Importe ($)", value=float(row_h.get('Importe', 0.0)) if pd.notna(row_h.get('Importe')) else 0.0, min_value=0.0)
+
+                        pass_hidro = st.text_input("🔑 Contraseña para confirmar cambio o eliminación", type="password")
+
+                        col_bh1, col_bh2 = st.columns(2)
+                        btn_save_h = col_bh1.form_submit_button("💾 Guardar Cambios", use_container_width=True)
+                        btn_delete_h = col_bh2.form_submit_button("🗑️ Eliminar Registro", use_container_width=True)
+                    
+                        if btn_save_h:
+                            usr_act = st.session_state.get("usuario", "")
+                            if not verificar_password_usuario(usr_act, pass_hidro):
+                                st.error("🔒 Contraseña incorrecta o no ingresada. No se guardaron los cambios.")
+                            else:
+                                cambios_h = []
+                                if str(row_h['Fecha']) != edit_fecha_h.strftime("%Y-%m-%d"):
+                                    cambios_h.append(f"Fecha: '{row_h['Fecha']}' -> '{edit_fecha_h.strftime('%Y-%m-%d')}'")
+                                if str(row_h['Producto']) != str(edit_prod_h):
+                                    cambios_h.append(f"Producto: '{row_h['Producto']}' -> '{edit_prod_h}'")
+                                if str(row_h['Movimiento']) != str(edit_mov_h):
+                                    cambios_h.append(f"Movimiento: '{row_h['Movimiento']}' -> '{edit_mov_h}'")
+                                if float(row_h['Cantidad']) != float(edit_cant_h):
+                                    cambios_h.append(f"Cantidad: {row_h['Cantidad']} -> {edit_cant_h}")
+                                if str(row_h['Destino']) != str(edit_dest_h):
+                                    cambios_h.append(f"Destino: '{row_h['Destino']}' -> '{edit_dest_h}'")
+                                op_val = "" if edit_oper_h == "-- Sin especificar --" else edit_oper_h
+                                if str(row_h['Operario']) != str(op_val):
+                                    cambios_h.append(f"Responsable: '{row_h['Operario']}' -> '{op_val}'")
+                                if str(row_h.get('Nro_Factura', '')) != str(edit_fact_h):
+                                    cambios_h.append(f"Factura: '{row_h.get('Nro_Factura', '')}' -> '{edit_fact_h}'")
                             
-                            log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            usr_str = usr_act if usr_act else "Usuario"
-                            detalle_c = ", ".join(cambios_h) if cambios_h else "Sin cambios"
-                            nuevo_log = f"{log_fecha} - Modificado por usuario {usr_str}: {detalle_c}"
-                            hist_act = str(row_h.get('HistorialModificaciones', '')) if pd.notna(row_h.get('HistorialModificaciones')) else ""
-                            nuevo_hist = (hist_act + "\n" + nuevo_log).strip()
-
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("""
-                            UPDATE hidrocarburos SET
-                                Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?, HistorialModificaciones = ?
-                            WHERE id = ?
-                            """, (edit_fecha_h.strftime("%Y-%m-%d"), edit_prod_h, edit_mov_h, edit_cant_h, edit_dest_h, op_val, nuevo_hist, db_id_h))
-                            guardar_cambios_db(conn)
-                            st.success("¡Registro de hidrocarburos actualizado con éxito!")
-                            st.rerun()
+                                log_fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                usr_str = usr_act if usr_act else "Usuario"
+                                detalle_c = ", ".join(cambios_h) if cambios_h else "Sin cambios"
+                                nuevo_log = f"{log_fecha} - Modificado por usuario {usr_str}: {detalle_c}"
+                                hist_act = str(row_h.get('HistorialModificaciones', '')) if pd.notna(row_h.get('HistorialModificaciones')) else ""
+                                nuevo_hist = (hist_act + "\n" + nuevo_log).strip()
                             
-                    if btn_delete_h:
-                        usr_act = st.session_state.get("usuario", "")
-                        if not verificar_password_usuario(usr_act, pass_hidro):
-                            st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
-                        else:
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM hidrocarburos WHERE id = ?", (db_id_h,))
-                            guardar_cambios_db(conn)
-                            st.success("¡Registro de hidrocarburos eliminado con éxito!")
-                            st.rerun()
-        else:
-            # Sanitizar strings para que jamás se genere un badge nulo en Streamlit
-            df_mostrar_sorted["Producto"] = df_mostrar_sorted["Producto"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
-            df_mostrar_sorted["Movimiento"] = df_mostrar_sorted["Movimiento"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
-            df_mostrar_sorted["Destino"] = df_mostrar_sorted["Destino"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
-            df_mostrar_sorted["Operario"] = df_mostrar_sorted["Operario"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+                                est_v_new = "Validado" if (edit_mov_h != "Ingreso" or edit_fact_h != "" or edit_prov_h != "") else "Pendiente Factura"
 
-            st.dataframe(
-                df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]],
-                column_config={
-                    "Fecha": st.column_config.TextColumn("Fecha"),
-                    "Producto": st.column_config.TextColumn("Producto"),
-                    "Movimiento": st.column_config.TextColumn("Movimiento"),
-                    "Cantidad": st.column_config.NumberColumn("Cantidad (Lts)", format="%.1f Lts"),
-                    "Destino": st.column_config.TextColumn("Destino"),
-                    "Operario": st.column_config.TextColumn("Responsable"),
-                },
-                use_container_width=True,
-                hide_index=True
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute("""
+                                UPDATE hidrocarburos SET
+                                    Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?,
+                                    Proveedor = ?, Nro_Factura = ?, Importe = ?, Estado_Validacion = ?, HistorialModificaciones = ?
+                                WHERE id = ?
+                                """, (edit_fecha_h.strftime("%Y-%m-%d"), edit_prod_h, edit_mov_h, edit_cant_h, edit_dest_h, op_val,
+                                      edit_prov_h.strip(), edit_fact_h.strip(), edit_imp_h, est_v_new, nuevo_hist, db_id_h))
+                                guardar_cambios_db(conn)
+                                st.success("¡Registro de hidrocarburos actualizado con éxito!")
+                                st.rerun()
+                            
+                        if btn_delete_h:
+                            usr_act = st.session_state.get("usuario", "")
+                            if not verificar_password_usuario(usr_act, pass_hidro):
+                                st.error("🔒 Contraseña incorrecta o no ingresada. No se pudo eliminar el registro.")
+                            else:
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM hidrocarburos WHERE id = ?", (db_id_h,))
+                                guardar_cambios_db(conn)
+                                st.success("¡Registro de hidrocarburos eliminado con éxito!")
+                                st.rerun()
+            else:
+                # Sanitizar strings para que jamás se genere un badge nulo en Streamlit
+                df_mostrar_sorted["Producto"] = df_mostrar_sorted["Producto"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+                df_mostrar_sorted["Movimiento"] = df_mostrar_sorted["Movimiento"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+                df_mostrar_sorted["Destino"] = df_mostrar_sorted["Destino"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+                df_mostrar_sorted["Operario"] = df_mostrar_sorted["Operario"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+            
+                # Badge de Estado de Validación
+                def badge_validacion(val, mov):
+                    if mov != "Ingreso":
+                        return "⚪ Salida Consumo"
+                    if str(val).strip() == "Validado":
+                        return "🟢 Factura Vinculada"
+                    return "🟡 Pendiente Factura"
+                
+                df_mostrar_sorted["Estado_Val_Badge"] = df_mostrar_sorted.apply(lambda r: badge_validacion(r.get('Estado_Validacion', ''), r.get('Movimiento', '')), axis=1)
+
+                st.dataframe(
+                    df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario", "Estado_Val_Badge", "Proveedor", "Nro_Factura"]],
+                    column_config={
+                        "Fecha": st.column_config.TextColumn("Fecha"),
+                        "Producto": st.column_config.TextColumn("Producto"),
+                        "Movimiento": st.column_config.TextColumn("Movimiento"),
+                        "Cantidad": st.column_config.NumberColumn("Cantidad (Lts)", format="%.1f Lts"),
+                        "Destino": st.column_config.TextColumn("Destino"),
+                        "Operario": st.column_config.TextColumn("Responsable"),
+                        "Estado_Val_Badge": st.column_config.TextColumn("Estado Validación"),
+                        "Proveedor": st.column_config.TextColumn("Proveedor"),
+                        "Nro_Factura": st.column_config.TextColumn("Factura/Remito")
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            st.divider()
+            st.markdown("##### 📥 Exportar Registros Filtrados para Administración:")
+            c_exp1, c_exp2 = st.columns(2)
+        
+            # 1. Excel
+            output_h = BytesIO()
+            excel_df_h = df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]].copy()
+            with pd.ExcelWriter(output_h, engine="openpyxl") as writer:
+                excel_df_h.to_excel(writer, index=False, sheet_name="Movimientos Hidrocarburos")
+            output_h.seek(0)
+        
+            c_exp1.download_button(
+                "📊 Exportar a Excel (.xlsx)",
+                data=output_h.getvalue(),
+                file_name=f"Reporte_Hidrocarburos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
             )
 
-        st.divider()
-        st.markdown("##### 📥 Exportar Registros Filtrados para Administración:")
-        c_exp1, c_exp2 = st.columns(2)
+            # 2. PDF Imprimible
+            pdf_bytes_h = generar_pdf_hidrocarburos(
+                df_mostrar_sorted,
+                filtro_prod_str=", ".join(filtro_prod) if filtro_prod else "Todos",
+                filtro_mov_str=filtro_mov,
+                filtro_anio_str=str(filtro_anio),
+                filtro_mes_str=filtro_mes,
+                ingresos=ingresos_periodo,
+                egresos=egresos_periodo,
+                balance=balance_periodo,
+                usuario_emisor=st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
+            )
         
-        # 1. Excel
-        output_h = BytesIO()
-        excel_df_h = df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]].copy()
-        with pd.ExcelWriter(output_h, engine="openpyxl") as writer:
-            excel_df_h.to_excel(writer, index=False, sheet_name="Movimientos Hidrocarburos")
-        output_h.seek(0)
-        
-        c_exp1.download_button(
-            "📊 Exportar a Excel (.xlsx)",
-            data=output_h.getvalue(),
-            file_name=f"Reporte_Hidrocarburos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-        # 2. PDF Imprimible
-        pdf_bytes_h = generar_pdf_hidrocarburos(
-            df_mostrar_sorted,
-            filtro_prod_str=", ".join(filtro_prod) if filtro_prod else "Todos",
-            filtro_mov_str=filtro_mov,
-            filtro_anio_str=str(filtro_anio),
-            filtro_mes_str=filtro_mes,
-            ingresos=ingresos_periodo,
-            egresos=egresos_periodo,
-            balance=balance_periodo,
-            usuario_emisor=st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
-        )
-        
-        c_exp2.download_button(
-            "📄 Exportar Reporte a PDF (.pdf)",
-            data=pdf_bytes_h,
-            file_name=f"Reporte_Hidrocarburos_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+            c_exp2.download_button(
+                "📄 Exportar Reporte a PDF (.pdf)",
+                data=pdf_bytes_h,
+                file_name=f"Reporte_Hidrocarburos_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
 # --- 8. DATOS MAESTROS & GESTIÓN QR ---
 elif menu == "⚙️ Datos Maestros & Gestión QR":
