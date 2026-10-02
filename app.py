@@ -2717,16 +2717,217 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
     
     # Cargar datos
     df_h = cargar_datos_db("hidrocarburos")
-    
+
+    def cerrar_modal_hidro_cb():
+        st.session_state["modal_hidro_id"] = None
+        if "tabla_hidrocarburos_general" in st.session_state:
+            st.session_state["tabla_hidrocarburos_general"] = {"selection": {"rows": []}}
+
+    @st.dialog("🔍 Ficha de Operación y Auditoría", width="large", on_dismiss=cerrar_modal_hidro_cb)
+    def ventana_flotante_detalle_hidro(id_a_mostrar, df_h, maquinas_list, empleados_list):
+        r_det = df_h[df_h['id'] == id_a_mostrar]
+        if r_det.empty:
+            st.warning("No se encontró el registro seleccionado.")
+            if st.button("Cerrar"):
+                cerrar_modal_hidro_cb()
+                st.rerun()
+            return
+
+        r_d = r_det.iloc[0]
+
+        # Encabezado visual de la operación
+        with st.container(border=True):
+            c_head1, c_head2 = st.columns([3, 1])
+            with c_head1:
+                st.markdown(f"### ⛽ **{r_d['Producto']}** — **{r_d['Cantidad']:,.1f} Litros** ({r_d['Movimiento']})")
+                if r_d['Movimiento'] == "Ingreso":
+                    if str(r_d.get('Estado_Validacion', '')).strip() == "Validado":
+                        st.markdown("<span class='badge-operativo'>🟢 FACTURA VINCULADA Y VALIDADA</span>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span>", unsafe_allow_html=True)
+                else:
+                    st.markdown("<span class='badge-operativo'>⚪ SALIDA A CONSUMO INTERNO</span>", unsafe_allow_html=True)
+            with c_head2:
+                st.metric("ID Operación", f"#{id_a_mostrar}")
+
+        st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+
+        # Dos columnas: Operación en Planta y Datos de Facturación
+        col_d1, col_d2 = st.columns(2)
+
+        with col_d1:
+            with st.container(border=True):
+                st.markdown("##### 🏭 Registro y Operación Física")
+                f_mov_vis = formatear_fecha_visible(r_d['Fecha'])
+                creador_vis = r_d.get('CreadoPor', 'Desconocido')
+                if pd.isna(creador_vis) or not str(creador_vis).strip():
+                    creador_vis = "Desconocido"
+                f_crea_vis = formatear_fecha_hora_visible(r_d.get('FechaCreacion', ''))
+                if not f_crea_vis:
+                    f_crea_vis = "No registrada (Carga histórica)"
+                op_vis = r_d.get('Operario', '')
+                if pd.isna(op_vis) or not str(op_vis).strip():
+                    op_vis = "No especificado"
+
+                st.markdown(f"📅 **Fecha del Movimiento:** {f_mov_vis}")
+                st.markdown(f"📍 **Destino / Equipo:** {r_d['Destino']}")
+                st.markdown(f"👤 **Cargado en el Sistema por:** `{creador_vis}`")
+                st.markdown(f"⏱️ **Fecha y Hora Exacta de Carga:** `{f_crea_vis}`")
+                st.markdown(f"👷 **Responsable en Planta:** {op_vis}")
+
+        with col_d2:
+            with st.container(border=True):
+                st.markdown("##### 🧾 Datos de Factura y Comprobante")
+                prov_vis = str(r_d.get('Proveedor', '')).strip() if pd.notna(r_d.get('Proveedor')) else ""
+                fact_vis = str(r_d.get('Nro_Factura', '')).strip() if pd.notna(r_d.get('Nro_Factura')) else ""
+                imp_vis = float(r_d.get('Importe', 0.0)) if pd.notna(r_d.get('Importe')) else 0.0
+                val_por_vis = str(r_d.get('Validado_Por', '')).strip() if pd.notna(r_d.get('Validado_Por')) else ""
+                f_val_vis = formatear_fecha_hora_visible(r_d.get('Fecha_Validacion', ''))
+
+                st.markdown(f"🏢 **Proveedor:** {prov_vis if prov_vis else '*(Sin registrar)*'}")
+                st.markdown(f"🧾 **N° Factura / Remito:** `{fact_vis if fact_vis else 'Sin registrar'}`")
+                st.markdown(f"💵 **Importe Total:** `${imp_vis:,.2f}`")
+                if imp_vis > 0 and float(r_d['Cantidad']) > 0:
+                    st.markdown(f"⛽ **Precio Unitario Calculado:** `${imp_vis / float(r_d['Cantidad']):.2f} / Litro`")
+                if val_por_vis:
+                    st.markdown(f"👤 **Validado por:** `{val_por_vis}` ({f_val_vis})")
+                elif r_d['Movimiento'] == "Ingreso":
+                    st.caption("⚠️ Factura aún pendiente de validación por Administración.")
+
+        # Historial de Modificaciones / Auditoría
+        hist_audit = str(r_d.get('HistorialModificaciones', '')).strip() if pd.notna(r_d.get('HistorialModificaciones')) else ""
+        with st.expander("📜 Historial Completo de Acciones y Modificaciones (Auditoría)", expanded=True if hist_audit else False):
+            if hist_audit:
+                st.text_area("Trazabilidad Inmutable:", value=hist_audit, height=130, disabled=True, key=f"hist_modal_view_{id_a_mostrar}")
+            else:
+                st.info("No se han registrado modificaciones posteriores sobre este movimiento.")
+
+        st.divider()
+
+        # Sección de Edición / Corrección
+        st.markdown(f"#### ✏️ Modificar Factura / Registro #{id_a_mostrar}")
+        st.caption("Si detectas un error en la factura, proveedor, importe o datos de la carga, corrígelo aquí. El sistema registrará automáticamente tu usuario, fecha y hora en el historial de auditoría.")
+
+        with st.form(f"form_modal_modificar_hidro_{id_a_mostrar}"):
+            st.markdown("###### 🧾 Datos de Facturación:")
+            cf1, cf2, cf3 = st.columns(3)
+            nuevo_prov = cf1.text_input("Proveedor", value=prov_vis, placeholder="Ej: YPF Directo")
+            nuevo_fact = cf2.text_input("N° de Factura / Remito", value=fact_vis, placeholder="Ej: A-0001-00045678")
+            nuevo_imp = cf3.number_input("Importe ($)", value=imp_vis, min_value=0.0, step=100.0)
+
+            st.markdown("###### ⚙️ Datos Operativos:")
+            co1, co2, co3 = st.columns(3)
+            try:
+                f_init = pd.to_datetime(r_d['Fecha']).date()
+            except:
+                f_init = datetime.now().date()
+            nueva_fecha = co1.date_input("Fecha", value=f_init, format="DD/MM/YYYY")
+
+            prods_posibles = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
+            idx_prod = prods_posibles.index(r_d['Producto']) if r_d['Producto'] in prods_posibles else 0
+            nuevo_prod = co1.selectbox("Producto", prods_posibles, index=idx_prod)
+
+            nuevo_mov = co2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if r_d['Movimiento'] == "Ingreso" else 1)
+            nueva_cant = co2.number_input("Cantidad (Litros)", value=float(r_d['Cantidad']), min_value=0.0)
+
+            dest_list = ["Stock Central"] + maquinas_list
+            idx_dest = dest_list.index(r_d['Destino']) if r_d['Destino'] in dest_list else 0
+            nuevo_dest = co3.selectbox("Destino", dest_list, index=idx_dest)
+
+            op_list = ["-- Sin especificar --"] + empleados_list
+            idx_op = op_list.index(r_d['Operario']) if r_d['Operario'] in op_list else 0
+            nuevo_op = co3.selectbox("Responsable en Planta", op_list, index=idx_op)
+
+            motivo_cambio = st.text_input("Motivo u Observación de la modificación (opcional):", placeholder="Ej: Corrección de número de factura por cambio de talonario")
+
+            col_btn_m1, col_btn_m2 = st.columns(2)
+            btn_guardar_mod = col_btn_m1.form_submit_button("💾 Guardar Cambios y Cerrar", use_container_width=True)
+            btn_cerrar_sin_guardar = col_btn_m2.form_submit_button("❌ Cerrar sin Guardar / Volver", use_container_width=True)
+
+            if btn_guardar_mod:
+                cambios = []
+                if prov_vis != nuevo_prov.strip():
+                    cambios.append(f"Proveedor: '{prov_vis}' -> '{nuevo_prov.strip()}'")
+                if fact_vis != nuevo_fact.strip():
+                    cambios.append(f"Factura: '{fact_vis}' -> '{nuevo_fact.strip()}'")
+                if abs(imp_vis - float(nuevo_imp)) > 0.01:
+                    cambios.append(f"Importe: ${imp_vis:,.2f} -> ${float(nuevo_imp):,.2f}")
+                if str(r_d['Fecha']) != nueva_fecha.strftime("%Y-%m-%d"):
+                    cambios.append(f"Fecha: '{r_d['Fecha']}' -> '{nueva_fecha.strftime('%Y-%m-%d')}'")
+                if str(r_d['Producto']) != str(nuevo_prod):
+                    cambios.append(f"Producto: '{r_d['Producto']}' -> '{nuevo_prod}'")
+                if str(r_d['Movimiento']) != str(nuevo_mov):
+                    cambios.append(f"Movimiento: '{r_d['Movimiento']}' -> '{nuevo_mov}'")
+                if abs(float(r_d['Cantidad']) - float(nueva_cant)) > 0.01:
+                    cambios.append(f"Cantidad: {r_d['Cantidad']} -> {nueva_cant}")
+                if str(r_d['Destino']) != str(nuevo_dest):
+                    cambios.append(f"Destino: '{r_d['Destino']}' -> '{nuevo_dest}'")
+                op_final = "" if nuevo_op == "-- Sin especificar --" else nuevo_op
+                if str(r_d['Operario']) != str(op_final):
+                    cambios.append(f"Responsable: '{r_d['Operario']}' -> '{op_final}'")
+
+                if not cambios:
+                    st.info("ℹ️ No se detectaron modificaciones en los datos.")
+                else:
+                    usuario_activo = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Administración"))
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    detalle_log = f"{now_str} - Modificado por {usuario_activo}: " + ", ".join(cambios)
+                    if motivo_cambio.strip():
+                        detalle_log += f" | Motivo: {motivo_cambio.strip()}"
+
+                    nuevo_historial = (hist_audit + "\n" + detalle_log).strip()
+
+                    nuevo_estado_val = "Validado" if (nuevo_mov != "Ingreso" or nuevo_fact.strip() != "" or nuevo_prov.strip() != "") else "Pendiente Factura"
+                    f_val_actualizada = now_str if (nuevo_estado_val == "Validado" and not f_val_vis) else r_d.get('Fecha_Validacion', '')
+                    u_val_actualizado = usuario_activo if (nuevo_estado_val == "Validado" and not val_por_vis) else r_d.get('Validado_Por', '')
+
+                    conn_mod = get_connection()
+                    cur_mod = conn_mod.cursor()
+                    cur_mod.execute("""
+                    UPDATE hidrocarburos SET
+                        Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?,
+                        Proveedor = ?, Nro_Factura = ?, Importe = ?, Estado_Validacion = ?,
+                        Fecha_Validacion = ?, Validado_Por = ?, HistorialModificaciones = ?
+                    WHERE id = ?
+                    """, (
+                        nueva_fecha.strftime("%Y-%m-%d"), nuevo_prod, nuevo_mov, nueva_cant, nuevo_dest, op_final,
+                        nuevo_prov.strip(), nuevo_fact.strip(), nuevo_imp, nuevo_estado_val,
+                        f_val_actualizada, u_val_actualizado, nuevo_historial, id_a_mostrar
+                    ))
+                    guardar_cambios_db(conn_mod)
+                    cerrar_modal_hidro_cb()
+                    st.success("🎉 ¡Operación y factura actualizadas con éxito! Los cambios quedaron asentados en el historial de auditoría.")
+                    st.rerun()
+
+            if btn_cerrar_sin_guardar:
+                cerrar_modal_hidro_cb()
+                st.rerun()
+
+        # Opción de eliminación restringida para administradores
+        rol_usr = st.session_state.get("rol", "")
+        if rol_usr == "Administrador":
+            with st.expander("🗑️ Eliminar este registro (Solo Administrador)"):
+                st.warning("⚠️ Esta acción es irreversible. Se eliminará el movimiento de la base de datos.")
+                pass_del = st.text_input("Ingresa tu contraseña para confirmar eliminación:", type="password", key=f"del_pass_modal_{id_a_mostrar}")
+                if st.button("Confirmar Eliminación Definitiva", key=f"btn_confirm_del_modal_{id_a_mostrar}", type="secondary"):
+                    usr_act = st.session_state.get("usuario", "")
+                    if not verificar_password_usuario(usr_act, pass_del):
+                        st.error("🔒 Contraseña incorrecta. No se eliminó el registro.")
+                    else:
+                        conn_del = get_connection()
+                        cur_del = conn_del.cursor()
+                        cur_del.execute("DELETE FROM hidrocarburos WHERE id = ?", (id_a_mostrar,))
+                        guardar_cambios_db(conn_del)
+                        cerrar_modal_hidro_cb()
+                        st.success("Registro eliminado con éxito.")
+                        st.rerun()
+
     if df_h.empty:
         st.warning("No se encontraron registros de movimientos de hidrocarburos.")
     else:
-        id_sel_tab = st.session_state.get("sel_hidro_audit_id", None)
-        lbl_tab_audit = f"🔍 Detalle y Auditoría {'(#' + str(id_sel_tab) + ')' if id_sel_tab else ''}"
-        tab_historial_h, tab_validar_h, tab_detalle_h = st.tabs([
+        tab_historial_h, tab_validar_h = st.tabs([
             "📊 Balances & Historial General",
-            f"🧾 Validación de Facturas / Remitos {'⚠️ (' + str(cnt_facturas_pendientes) + ')' if cnt_facturas_pendientes > 0 else '✅ Al Día'}",
-            lbl_tab_audit
+            f"🧾 Validación de Facturas / Remitos {'⚠️ (' + str(cnt_facturas_pendientes) + ')' if cnt_facturas_pendientes > 0 else '✅ Al Día'}"
         ])
 
         with tab_validar_h:
@@ -2886,57 +3087,46 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             df_mostrar_sorted["Fecha"] = df_mostrar_sorted["Fecha"].apply(formatear_fecha_visible)
             df_mostrar_sorted = df_mostrar_sorted.fillna("")
 
-            # Selector de movimientos para auditar y consultar detalle
+            # Selector directo para abrir la ventana flotante
             st.markdown("##### 🔍 Historial de Movimientos")
-            st.caption("💡 Haz clic en cualquier fila de la tabla o selecciona un movimiento de la lista para consultar su factura completa, quién lo cargó, hora y trazabilidad en la pestaña superior '🔍 Detalle y Auditoría'.")
-            
-            opciones_editar_h = ["-- Seleccionar registro para ver detalle o editar --"] + [
+            st.caption("💡 Haz clic en cualquier fila de la tabla o selecciona un movimiento de la lista para abrir directamente su ventana flotante con el detalle de la factura, creador, hora y auditoría.")
+
+            opciones_modal_h = ["-- Seleccionar registro para ver detalle y factura --"] + [
                 f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts) | {r['Destino']}" 
                 for _, r in df_mostrar.sort_values(by='id', ascending=False).iterrows()
             ]
-            
-            def cb_cambio_sel_direct():
-                val = st.session_state.get("sel_hidro_direct")
+
+            def cb_sel_modal_direct():
+                val = st.session_state.get("sel_hidro_modal_trigger")
                 if val and not val.startswith("--"):
                     try:
                         s_id = int(val.split(" | ")[0].replace("ID ", ""))
-                        st.session_state["sel_hidro_audit_id"] = s_id
+                        st.session_state["modal_hidro_id"] = s_id
                     except Exception:
                         pass
 
-            idx_def_direct = 0
-            curr_sel_id = st.session_state.get("sel_hidro_audit_id")
-            if curr_sel_id:
-                for idx_o, opt_s in enumerate(opciones_editar_h):
-                    if opt_s.startswith(f"ID {curr_sel_id} |"):
-                        idx_def_direct = idx_o
+            idx_def_modal = 0
+            curr_modal_id = st.session_state.get("modal_hidro_id")
+            if curr_modal_id:
+                for idx_o, opt_s in enumerate(opciones_modal_h):
+                    if opt_s.startswith(f"ID {curr_modal_id} |"):
+                        idx_def_modal = idx_o
                         break
 
-            registro_a_editar_h = st.selectbox(
+            registro_sel_box = st.selectbox(
                 "✏️ Seleccioná un registro de la lista:", 
-                opciones_editar_h, 
-                index=idx_def_direct,
-                key="sel_hidro_direct",
-                on_change=cb_cambio_sel_direct
+                opciones_modal_h, 
+                index=idx_def_modal,
+                key="sel_hidro_modal_trigger",
+                on_change=cb_sel_modal_direct
             )
 
-            if registro_a_editar_h and not registro_a_editar_h.startswith("--"):
+            if registro_sel_box and not registro_sel_box.startswith("--"):
                 try:
-                    s_id_sel = int(registro_a_editar_h.split(" | ")[0].replace("ID ", ""))
-                    st.session_state["sel_hidro_audit_id"] = s_id_sel
+                    s_id_sel = int(registro_sel_box.split(" | ")[0].replace("ID ", ""))
+                    st.session_state["modal_hidro_id"] = s_id_sel
                 except Exception:
                     pass
-
-            if st.session_state.get("sel_hidro_audit_id"):
-                id_act_banner = st.session_state["sel_hidro_audit_id"]
-                r_act_df = df_h[df_h['id'] == id_act_banner]
-                if not r_act_df.empty:
-                    r_act_item = r_act_df.iloc[0]
-                    c_ban1, c_ban2 = st.columns([3.2, 0.8])
-                    c_ban1.info(f"👉 **Movimiento #{id_act_banner} seleccionado:** {r_act_item['Producto']} ({r_act_item['Cantidad']} Lts) - {r_act_item['Movimiento']}. Ve a la pestaña **'🔍 Detalle y Auditoría'** en la barra superior para ver su ficha completa, comprobante y realizar modificaciones.")
-                    if c_ban2.button("❌ Deseleccionar", key="btn_desel_historial", use_container_width=True):
-                        st.session_state["sel_hidro_audit_id"] = None
-                        st.rerun()
 
             # Sanitizar strings para que jamás se genere un badge nulo en Streamlit
             df_mostrar_sorted["Producto"] = df_mostrar_sorted["Producto"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
@@ -2982,9 +3172,13 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                     idx_click = rows_click[0]
                     if idx_click < len(df_mostrar_sorted):
                         id_seleccionado_click = int(df_mostrar_sorted.iloc[idx_click]["id"])
-                        if st.session_state.get("sel_hidro_audit_id") != id_seleccionado_click:
-                            st.session_state["sel_hidro_audit_id"] = id_seleccionado_click
+                        if st.session_state.get("modal_hidro_id") != id_seleccionado_click:
+                            st.session_state["modal_hidro_id"] = id_seleccionado_click
                             st.rerun()
+
+            # Abrir inmediatamente la ventana flotante si hay un movimiento seleccionado
+            if st.session_state.get("modal_hidro_id"):
+                ventana_flotante_detalle_hidro(st.session_state["modal_hidro_id"], df_h, maquinas_list, empleados_list)
 
             st.divider()
             st.markdown("##### 📥 Exportar Registros Filtrados para Administración:")
@@ -3025,244 +3219,6 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                 mime="application/pdf",
                 use_container_width=True
             )
-
-        with tab_detalle_h:
-            st.subheader("🔍 Ficha Técnica y Auditoría de la Operación")
-            st.caption("Consulta el detalle de cada movimiento, datos del comprobante/factura, usuario que lo cargó y hora exacta. Si hay algún error, puedes corregirlo registrando la modificación en la auditoría inmutable.")
-
-            # Selector directo en la pestaña de detalle
-            todas_opciones_audit = ["-- Seleccionar movimiento para auditar --"] + [
-                f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts) | {r['Destino']}" 
-                for _, r in df_h.sort_values(by='id', ascending=False).iterrows()
-            ]
-
-            def cb_cambio_sel_tab3():
-                val_t3 = st.session_state.get("sel_hidro_tab3_box")
-                if val_t3 and not val_t3.startswith("--"):
-                    try:
-                        s_id = int(val_t3.split(" | ")[0].replace("ID ", ""))
-                        st.session_state["sel_hidro_audit_id"] = s_id
-                    except Exception:
-                        pass
-
-            idx_def_tab3 = 0
-            id_actual_audit = st.session_state.get("sel_hidro_audit_id", None)
-            if id_actual_audit:
-                for i_opt, opt in enumerate(todas_opciones_audit):
-                    if opt.startswith(f"ID {id_actual_audit} |"):
-                        idx_def_tab3 = i_opt
-                        break
-
-            sel_en_tab3 = st.selectbox(
-                "🔎 Seleccionar movimiento para consultar / modificar:",
-                todas_opciones_audit,
-                index=idx_def_tab3,
-                key="sel_hidro_tab3_box",
-                on_change=cb_cambio_sel_tab3
-            )
-
-            id_final_mostrar = None
-            if sel_en_tab3 and not sel_en_tab3.startswith("--"):
-                try:
-                    id_final_mostrar = int(sel_en_tab3.split(" | ")[0].replace("ID ", ""))
-                except Exception:
-                    pass
-            elif id_actual_audit:
-                id_final_mostrar = id_actual_audit
-
-            if id_final_mostrar:
-                r_det = df_h[df_h['id'] == id_final_mostrar]
-                if not r_det.empty:
-                    r_d = r_det.iloc[0]
-
-                    # Encabezado visual de la operación
-                    with st.container(border=True):
-                        c_head1, c_head2 = st.columns([3, 1])
-                        with c_head1:
-                            st.markdown(f"### ⛽ **{r_d['Producto']}** — **{r_d['Cantidad']:,.1f} Litros** ({r_d['Movimiento']})")
-                            if r_d['Movimiento'] == "Ingreso":
-                                if str(r_d.get('Estado_Validacion', '')).strip() == "Validado":
-                                    st.markdown("<span class='badge-operativo'>🟢 FACTURA VINCULADA Y VALIDADA</span>", unsafe_allow_html=True)
-                                else:
-                                    st.markdown("<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span>", unsafe_allow_html=True)
-                            else:
-                                st.markdown("<span class='badge-operativo'>⚪ SALIDA A CONSUMO INTERNO</span>", unsafe_allow_html=True)
-                        with c_head2:
-                            st.metric("ID Operación", f"#{id_final_mostrar}")
-
-                    st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
-
-                    # Dos columnas: Operación en Planta y Datos de Facturación
-                    col_d1, col_d2 = st.columns(2)
-
-                    with col_d1:
-                        with st.container(border=True):
-                            st.markdown("##### 🏭 Registro y Operación Física")
-                            f_mov_vis = formatear_fecha_visible(r_d['Fecha'])
-                            creador_vis = r_d.get('CreadoPor', 'Desconocido')
-                            if pd.isna(creador_vis) or not str(creador_vis).strip():
-                                creador_vis = "Desconocido"
-                            f_crea_vis = formatear_fecha_hora_visible(r_d.get('FechaCreacion', ''))
-                            if not f_crea_vis:
-                                f_crea_vis = "No registrada (Carga histórica)"
-                            op_vis = r_d.get('Operario', '')
-                            if pd.isna(op_vis) or not str(op_vis).strip():
-                                op_vis = "No especificado"
-
-                            st.markdown(f"📅 **Fecha del Movimiento:** {f_mov_vis}")
-                            st.markdown(f"📍 **Destino / Equipo:** {r_d['Destino']}")
-                            st.markdown(f"👤 **Cargado en el Sistema por:** `{creador_vis}`")
-                            st.markdown(f"⏱️ **Fecha y Hora Exacta de Carga:** `{f_crea_vis}`")
-                            st.markdown(f"👷 **Responsable en Planta:** {op_vis}")
-
-                    with col_d2:
-                        with st.container(border=True):
-                            st.markdown("##### 🧾 Datos de Factura y Comprobante")
-                            prov_vis = str(r_d.get('Proveedor', '')).strip() if pd.notna(r_d.get('Proveedor')) else ""
-                            fact_vis = str(r_d.get('Nro_Factura', '')).strip() if pd.notna(r_d.get('Nro_Factura')) else ""
-                            imp_vis = float(r_d.get('Importe', 0.0)) if pd.notna(r_d.get('Importe')) else 0.0
-                            val_por_vis = str(r_d.get('Validado_Por', '')).strip() if pd.notna(r_d.get('Validado_Por')) else ""
-                            f_val_vis = formatear_fecha_hora_visible(r_d.get('Fecha_Validacion', ''))
-
-                            st.markdown(f"🏢 **Proveedor:** {prov_vis if prov_vis else '*(Sin registrar)*'}")
-                            st.markdown(f"🧾 **N° Factura / Remito:** `{fact_vis if fact_vis else 'Sin registrar'}`")
-                            st.markdown(f"💵 **Importe Total:** `${imp_vis:,.2f}`")
-                            if imp_vis > 0 and float(r_d['Cantidad']) > 0:
-                                st.markdown(f"⛽ **Precio Unitario Calculado:** `${imp_vis / float(r_d['Cantidad']):.2f} / Litro`")
-                            if val_por_vis:
-                                st.markdown(f"👤 **Validado por:** `{val_por_vis}` ({f_val_vis})")
-                            elif r_d['Movimiento'] == "Ingreso":
-                                st.caption("⚠️ Factura aún pendiente de validación por Administración.")
-
-                    # Historial de Modificaciones / Auditoría
-                    hist_audit = str(r_d.get('HistorialModificaciones', '')).strip() if pd.notna(r_d.get('HistorialModificaciones')) else ""
-                    with st.expander("📜 Historial Completo de Acciones y Modificaciones (Auditoría)", expanded=True if hist_audit else False):
-                        if hist_audit:
-                            st.text_area("Trazabilidad Inmutable:", value=hist_audit, height=130, disabled=True, key=f"hist_view_{id_final_mostrar}")
-                        else:
-                            st.info("No se han registrado modificaciones posteriores sobre este movimiento.")
-
-                    st.divider()
-
-                    # Sección de Edición / Corrección
-                    st.markdown(f"#### ✏️ Modificar Factura / Registro #{id_final_mostrar}")
-                    st.caption("Si detectas un error en la factura, proveedor, importe o datos de la carga, puedes corregirlo aquí. El sistema registrará automáticamente tu usuario, fecha y hora en el historial de auditoría.")
-
-                    with st.form(f"form_modificar_completo_hidro_{id_final_mostrar}"):
-                        st.markdown("###### 🧾 Datos de Facturación:")
-                        cf1, cf2, cf3 = st.columns(3)
-                        nuevo_prov = cf1.text_input("Proveedor", value=prov_vis, placeholder="Ej: YPF Directo")
-                        nuevo_fact = cf2.text_input("N° de Factura / Remito", value=fact_vis, placeholder="Ej: A-0001-00045678")
-                        nuevo_imp = cf3.number_input("Importe ($)", value=imp_vis, min_value=0.0, step=100.0)
-
-                        st.markdown("###### ⚙️ Datos Operativos:")
-                        co1, co2, co3 = st.columns(3)
-                        try:
-                            f_init = pd.to_datetime(r_d['Fecha']).date()
-                        except:
-                            f_init = datetime.now().date()
-                        nueva_fecha = co1.date_input("Fecha", value=f_init, format="DD/MM/YYYY")
-
-                        prods_posibles = ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"]
-                        idx_prod = prods_posibles.index(r_d['Producto']) if r_d['Producto'] in prods_posibles else 0
-                        nuevo_prod = co1.selectbox("Producto", prods_posibles, index=idx_prod)
-
-                        nuevo_mov = co2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if r_d['Movimiento'] == "Ingreso" else 1)
-                        nueva_cant = co2.number_input("Cantidad (Litros)", value=float(r_d['Cantidad']), min_value=0.0)
-
-                        dest_list = ["Stock Central"] + maquinas_list
-                        idx_dest = dest_list.index(r_d['Destino']) if r_d['Destino'] in dest_list else 0
-                        nuevo_dest = co3.selectbox("Destino", dest_list, index=idx_dest)
-
-                        op_list = ["-- Sin especificar --"] + empleados_list
-                        idx_op = op_list.index(r_d['Operario']) if r_d['Operario'] in op_list else 0
-                        nuevo_op = co3.selectbox("Responsable en Planta", op_list, index=idx_op)
-
-                        motivo_cambio = st.text_input("Motivo u Observación de la modificación (opcional):", placeholder="Ej: Corrección de número de factura por cambio de talonario")
-
-                        col_btn_m1, col_btn_m2 = st.columns(2)
-                        btn_guardar_mod = col_btn_m1.form_submit_button("💾 Guardar Cambios y Cerrar", use_container_width=True)
-                        btn_cerrar_sin_guardar = col_btn_m2.form_submit_button("❌ Cerrar Detalle / Volver", use_container_width=True)
-
-                        if btn_guardar_mod:
-                            # Comprobar diferencias
-                            cambios = []
-                            if prov_vis != nuevo_prov.strip():
-                                cambios.append(f"Proveedor: '{prov_vis}' -> '{nuevo_prov.strip()}'")
-                            if fact_vis != nuevo_fact.strip():
-                                cambios.append(f"Factura: '{fact_vis}' -> '{nuevo_fact.strip()}'")
-                            if abs(imp_vis - float(nuevo_imp)) > 0.01:
-                                cambios.append(f"Importe: ${imp_vis:,.2f} -> ${float(nuevo_imp):,.2f}")
-                            if str(r_d['Fecha']) != nueva_fecha.strftime("%Y-%m-%d"):
-                                cambios.append(f"Fecha: '{r_d['Fecha']}' -> '{nueva_fecha.strftime('%Y-%m-%d')}'")
-                            if str(r_d['Producto']) != str(nuevo_prod):
-                                cambios.append(f"Producto: '{r_d['Producto']}' -> '{nuevo_prod}'")
-                            if str(r_d['Movimiento']) != str(nuevo_mov):
-                                cambios.append(f"Movimiento: '{r_d['Movimiento']}' -> '{nuevo_mov}'")
-                            if abs(float(r_d['Cantidad']) - float(nueva_cant)) > 0.01:
-                                cambios.append(f"Cantidad: {r_d['Cantidad']} -> {nueva_cant}")
-                            if str(r_d['Destino']) != str(nuevo_dest):
-                                cambios.append(f"Destino: '{r_d['Destino']}' -> '{nuevo_dest}'")
-                            op_final = "" if nuevo_op == "-- Sin especificar --" else nuevo_op
-                            if str(r_d['Operario']) != str(op_final):
-                                cambios.append(f"Responsable: '{r_d['Operario']}' -> '{op_final}'")
-
-                            if not cambios:
-                                st.info("ℹ️ No se detectaron modificaciones en los datos.")
-                            else:
-                                usuario_activo = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Administración"))
-                                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                detalle_log = f"{now_str} - Modificado por {usuario_activo}: " + ", ".join(cambios)
-                                if motivo_cambio.strip():
-                                    detalle_log += f" | Motivo: {motivo_cambio.strip()}"
-
-                                nuevo_historial = (hist_audit + "\n" + detalle_log).strip()
-
-                                nuevo_estado_val = "Validado" if (nuevo_mov != "Ingreso" or nuevo_fact.strip() != "" or nuevo_prov.strip() != "") else "Pendiente Factura"
-                                f_val_actualizada = now_str if (nuevo_estado_val == "Validado" and not f_val_vis) else r_d.get('Fecha_Validacion', '')
-                                u_val_actualizado = usuario_activo if (nuevo_estado_val == "Validado" and not val_por_vis) else r_d.get('Validado_Por', '')
-
-                                conn_mod = get_connection()
-                                cur_mod = conn_mod.cursor()
-                                cur_mod.execute("""
-                                UPDATE hidrocarburos SET
-                                    Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?,
-                                    Proveedor = ?, Nro_Factura = ?, Importe = ?, Estado_Validacion = ?,
-                                    Fecha_Validacion = ?, Validado_Por = ?, HistorialModificaciones = ?
-                                WHERE id = ?
-                                """, (
-                                    nueva_fecha.strftime("%Y-%m-%d"), nuevo_prod, nuevo_mov, nueva_cant, nuevo_dest, op_final,
-                                    nuevo_prov.strip(), nuevo_fact.strip(), nuevo_imp, nuevo_estado_val,
-                                    f_val_actualizada, u_val_actualizado, nuevo_historial, id_final_mostrar
-                                ))
-                                guardar_cambios_db(conn_mod)
-                                st.success("🎉 ¡Operación y factura actualizadas con éxito! Los cambios quedaron asentados en el historial de auditoría.")
-                                st.rerun()
-
-                        if btn_cerrar_sin_guardar:
-                            st.session_state["sel_hidro_audit_id"] = None
-                            st.rerun()
-
-                    # Opción de eliminación restringida para administradores
-                    rol_usr = st.session_state.get("rol", "")
-                    if rol_usr == "Administrador":
-                        with st.expander("🗑️ Eliminar este registro (Solo Administrador)"):
-                            st.warning("⚠️ Esta acción es irreversible. Se eliminará el movimiento de la base de datos.")
-                            pass_del = st.text_input("Ingresa tu contraseña para confirmar eliminación:", type="password", key=f"del_pass_{id_final_mostrar}")
-                            if st.button("Confirmar Eliminación Definitiva", key=f"btn_confirm_del_{id_final_mostrar}", type="secondary"):
-                                usr_act = st.session_state.get("usuario", "")
-                                if not verificar_password_usuario(usr_act, pass_del):
-                                    st.error("🔒 Contraseña incorrecta. No se eliminó el registro.")
-                                else:
-                                    conn_del = get_connection()
-                                    cur_del = conn_del.cursor()
-                                    cur_del.execute("DELETE FROM hidrocarburos WHERE id = ?", (id_final_mostrar,))
-                                    guardar_cambios_db(conn_del)
-                                    st.session_state["sel_hidro_audit_id"] = None
-                                    st.success("Registro eliminado con éxito.")
-                                    st.rerun()
-            else:
-                st.info("ℹ️ No hay ningún movimiento seleccionado. Elige uno en el selector de arriba o haz clic sobre cualquier fila en la tabla de la pestaña '📊 Balances & Historial General' para inspeccionar su factura y auditoría.")
 
 # --- 8. DATOS MAESTROS & GESTIÓN QR ---
 elif menu == "⚙️ Datos Maestros & Gestión QR":
