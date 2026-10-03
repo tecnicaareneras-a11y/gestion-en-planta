@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from datetime import datetime
 import sqlite3
 import os
@@ -271,6 +272,64 @@ def formatear_fecha_hora_visible(fechahora_str):
     except:
         return str(fechahora_str)
 
+# --- EXPORTACIONES Y CÁLCULOS OPTIMIZADOS CON CACHÉ DE ALTO RENDIMIENTO ---
+@st.cache_data(show_spinner=False)
+def generar_excel_bytes(df: pd.DataFrame, sheet_name: str = "Datos") -> bytes:
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return output.getvalue()
+
+@st.cache_data(show_spinner=False)
+def generar_excel_multisheet_bytes(tablas_dict: dict) -> bytes:
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name, df in tablas_dict.items():
+            if not df.empty:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+    return output.getvalue()
+
+@st.cache_data(show_spinner=False)
+def calcular_horas_totales(df):
+    if df.empty:
+        return 0.0
+    def diff_horas(row):
+        try:
+            str_i = str(row['Inicio']).strip()
+            str_f = str(row['Fin']).strip()
+            
+            # Caso 1: Si incluye "hs" (ej: "48.0 hs" o "120.0 hs")
+            if "hs" in str_f.lower():
+                clean_f = str_f.lower().split("hs")[0].split("(")[-1].replace(")", "").strip()
+                return float(clean_f)
+            if "hs" in str_i.lower():
+                clean_i = str_i.lower().split("hs")[0].split("(")[-1].replace(")", "").strip()
+                return float(clean_i)
+                
+            # Caso 2: Números directos (ej: Inicio="0.0", Fin="24.0")
+            if ":" not in str_i and ":" not in str_f:
+                try:
+                    val_f = float(str_f)
+                    val_i = float(str_i)
+                    return max(0.0, val_f - val_i) if val_f >= val_i else val_f
+                except:
+                    pass
+                    
+            # Caso 3: Formato horario HH:MM
+            h_i, m_i = map(int, str_i.split(':'))
+            h_f, m_f = map(int, str_f.split(':'))
+            diff = (h_f * 60 + m_f) - (h_i * 60 + m_i)
+            if diff < 0:
+                diff += 24 * 60
+            return max(0.0, diff / 60.0)
+        except:
+            try:
+                return float(row['Fin'])
+            except:
+                return 0.0
+    return float(df.apply(diff_horas, axis=1).sum())
+
+@st.cache_data(show_spinner=False)
 def generar_pdf_hidrocarburos(df_reporte, filtro_prod_str, filtro_mov_str, filtro_anio_str, filtro_mes_str, ingresos, egresos, balance, usuario_emisor=""):
     try:
         from fpdf import FPDF
@@ -796,12 +855,23 @@ def descargar_db_desde_nube():
             "error": str(e)
         }
 
+@st.cache_resource(ttl=900)
+def sincronizar_nube_inteligente():
+    """
+    Descarga la base de datos de Google Drive al arrancar el servidor o si pasaron más de 15 minutos,
+    evitando demoras de red de varios segundos en cada recarga de página o nueva sesión.
+    """
+    return descargar_db_desde_nube()
+
 # Alias para compatibilidad
 descargar_db_inicial = descargar_db_desde_nube
 
-# Descargar automáticamente la base de datos más reciente de Google Drive al inicio de cada sesión
+# Descargar automáticamente la base de datos más reciente de Google Drive al inicio
 if "session_db_synced" not in st.session_state:
-    descargar_db_desde_nube()
+    if not os.path.exists(DB_FILE):
+        descargar_db_desde_nube()
+    else:
+        sincronizar_nube_inteligente()
     st.session_state["session_db_synced"] = True
 
 # Inicializar Base de Datos al arrancar la app y migrar datos antiguos (sólo una vez por sesión para máxima agilidad)
@@ -1520,7 +1590,8 @@ for default_h in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de L
 # El resto son repuestos e insumos generales
 productos_list = [p for p in all_products if not any(k in p.lower() for k in hidro_keywords)]
 
-# Catálogo dinámico de proveedores de combustibles e hidrocarburos
+# Catálogo dinámico de proveedores de combustibles e hidrocarburos (con caché en memoria)
+@st.cache_data(ttl=60, show_spinner=False)
 def obtener_lista_proveedores():
     provs = ["YPF Directo", "Axion Energy", "Shell / Raízen", "Puma Energy", "DAPSA", "Distribuidor Mayorista"]
     try:
@@ -1568,20 +1639,25 @@ else:
         "⚙️ Datos Maestros & Gestión QR",
         "📥 Exportación Global de Datos"
     ]
-# Consulta de Alertas de Facturación Pendiente en Hidrocarburos
-conn_sb = get_connection()
-cursor_sb = conn_sb.cursor()
-try:
-    cursor_sb.execute("""
-    SELECT COUNT(*) FROM hidrocarburos 
-    WHERE Movimiento = 'Ingreso' 
-      AND (Estado_Validacion = 'Pendiente Factura' OR Estado_Validacion IS NULL OR Estado_Validacion = ''
-           OR ((Nro_Factura IS NULL OR trim(Nro_Factura) = '') AND (Proveedor IS NULL OR trim(Proveedor) = '') AND (Validado_Por IS NULL OR trim(Validado_Por) = '')))
-    """)
-    cnt_facturas_pendientes = cursor_sb.fetchone()[0]
-except:
-    cnt_facturas_pendientes = 0
-conn_sb.close()
+# Consulta de Alertas de Facturación Pendiente en Hidrocarburos (con caché en memoria)
+@st.cache_data(ttl=30, show_spinner=False)
+def obtener_cnt_facturas_pendientes():
+    try:
+        conn_sb = get_connection()
+        cursor_sb = conn_sb.cursor()
+        cursor_sb.execute("""
+        SELECT COUNT(*) FROM hidrocarburos 
+        WHERE Movimiento = 'Ingreso' 
+          AND (Estado_Validacion = 'Pendiente Factura' OR Estado_Validacion IS NULL OR Estado_Validacion = ''
+               OR ((Nro_Factura IS NULL OR trim(Nro_Factura) = '') AND (Proveedor IS NULL OR trim(Proveedor) = '') AND (Validado_Por IS NULL OR trim(Validado_Por) = '')))
+        """)
+        cnt = cursor_sb.fetchone()[0]
+        conn_sb.close()
+        return cnt
+    except Exception:
+        return 0
+
+cnt_facturas_pendientes = obtener_cnt_facturas_pendientes()
 
 if cnt_facturas_pendientes > 0:
     st.sidebar.markdown(f"""
@@ -1677,52 +1753,15 @@ if menu == "🏠 Inicio - Tablero General":
     cant_prev_glob = len(df_mant[df_mant['Tipo'] == 'Preventivo']) if not df_mant.empty else 0
     cant_corr_glob = len(df_mant[df_mant['Tipo'] == 'Correctivo']) if not df_mant.empty else 0
     
-    def calcular_horas_totales(df):
-        if df.empty:
-            return 0.0
-        def diff_horas(row):
-            try:
-                str_i = str(row['Inicio']).strip()
-                str_f = str(row['Fin']).strip()
-                
-                # Caso 1: Si incluye "hs" (ej: "48.0 hs" o "120.0 hs")
-                if "hs" in str_f.lower():
-                    clean_f = str_f.lower().split("hs")[0].split("(")[-1].replace(")", "").strip()
-                    return float(clean_f)
-                if "hs" in str_i.lower():
-                    clean_i = str_i.lower().split("hs")[0].split("(")[-1].replace(")", "").strip()
-                    return float(clean_i)
-                    
-                # Caso 2: Números directos (ej: Inicio="0.0", Fin="24.0")
-                if ":" not in str_i and ":" not in str_f:
-                    try:
-                        val_f = float(str_f)
-                        val_i = float(str_i)
-                        return max(0.0, val_f - val_i) if val_f >= val_i else val_f
-                    except:
-                        pass
-                        
-                # Caso 3: Formato horario HH:MM
-                h_i, m_i = map(int, str_i.split(':'))
-                h_f, m_f = map(int, str_f.split(':'))
-                diff = (h_f * 60 + m_f) - (h_i * 60 + m_i)
-                if diff < 0:
-                    diff += 24 * 60
-                return max(0.0, diff / 60.0)
-            except:
-                try:
-                    return float(row['Fin'])
-                except:
-                    return 0.0
-        return df.apply(diff_horas, axis=1).sum()
-        
     horas_taller_glob = calcular_horas_totales(df_mant)
     maquinas_interven_glob = df_mant['Maquina'].nunique() if not df_mant.empty else 0
     
     stock_combustible = {}
     if not df_hidro.empty:
-        df_hidro['Val'] = df_hidro.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
-        stock_combustible = df_hidro.groupby('Producto')['Val'].sum().to_dict()
+        cant_h_arr = pd.to_numeric(df_hidro['Cantidad'], errors='coerce').fillna(0)
+        vals_h = np.where(df_hidro['Movimiento'] == "Ingreso", cant_h_arr, -cant_h_arr)
+        df_temp = pd.DataFrame({'Producto': df_hidro['Producto'], 'Val': vals_h})
+        stock_combustible = df_temp.groupby('Producto')['Val'].sum().to_dict()
         
     stock_gasoil_val = stock_combustible.get('Gas-oil', 0.0)
 
@@ -1767,8 +1806,13 @@ if menu == "🏠 Inicio - Tablero General":
         else:
             equipos_filtrados = equipos_clave
 
-        user_token_enc = urllib.parse.quote(st.session_state.get("token", ""))
-        user_usr_enc = urllib.parse.quote(st.session_state.get("usuario", ""))
+        ultimos_mants_dict = {}
+        if not df_mant.empty and "Maquina" in df_mant.columns and "Fecha" in df_mant.columns:
+            ultimos_mants_df = df_mant.sort_values(by="Fecha", ascending=False).drop_duplicates(subset=["Maquina"])
+            ultimos_mants_dict = dict(zip(ultimos_mants_df["Maquina"], ultimos_mants_df["Fecha"]))
+
+        user_token_enc = urllib.parse.quote(str(st.session_state.get("token") or ""))
+        user_usr_enc = urllib.parse.quote(str(st.session_state.get("usuario") or ""))
         base_url_qr = "https://gestion-en-planta-adlc.streamlit.app"
         cols_matrix = st.columns(4)
         for idx, eq in enumerate(equipos_filtrados):
@@ -1778,13 +1822,11 @@ if menu == "🏠 Inicio - Tablero General":
                     st.markdown(f"**{eq['icono']} {eq['nombre']}**")
                     st.markdown(f"<span class='{eq['badge']}'>🟢 {eq['estado']}</span>", unsafe_allow_html=True)
                     
-                    if not df_mant.empty and "Maquina" in df_mant.columns:
-                        mants_eq = df_mant[df_mant["Maquina"] == eq["nombre"]]
-                        if not mants_eq.empty:
-                            ult_m = mants_eq.sort_values(by="Fecha", ascending=False).iloc[0]
-                            st.caption(f"Último: {formatear_fecha_visible(ult_m['Fecha'])}")
-                        else:
-                            st.caption("Sin registros recientes")
+                    fecha_ult = ultimos_mants_dict.get(eq["nombre"])
+                    if fecha_ult:
+                        st.caption(f"Último: {formatear_fecha_visible(fecha_ult)}")
+                    else:
+                        st.caption("Sin registros recientes")
                     
                     url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(eq['nombre'])}&usr={user_usr_enc}&tkn={user_token_enc}"
                     st.link_button("🔧 Ficha / Mant.", url_m, use_container_width=True)
@@ -2151,8 +2193,8 @@ elif menu == "📋 Reporte Mant. Realizado":
 
             # Agregar columna virtual para enlace a nueva pestaña en la visualización
             export_df = df_filtrado[["N° Registro"]].copy()
-            user_token = urllib.parse.quote(st.session_state.get("token", ""))
-            user_usr = urllib.parse.quote(st.session_state.get("usuario", ""))
+            user_token = urllib.parse.quote(str(st.session_state.get("token") or ""))
+            user_usr = urllib.parse.quote(str(st.session_state.get("usuario") or ""))
             export_df["Ficha"] = df_filtrado["id"].apply(lambda x: f"{base_url}/?id={x}&usr={user_usr}&tkn={user_token}")
             export_df["Fecha"] = df_filtrado["Fecha"].apply(formatear_fecha_visible)
             for col in ["Deposito", "Maquina", "Operario", "Tipo", "Inicio", "Fin", "Horimetro", "Detalle"]:
@@ -2161,13 +2203,10 @@ elif menu == "📋 Reporte Mant. Realizado":
             # Crear copia limpia para exportar a Excel (sin la columna de URL interna Ficha)
             excel_export_df = export_df[["N° Registro", "Fecha", "Deposito", "Maquina", "Operario", "Tipo", "Inicio", "Fin", "Horimetro", "Detalle"]].copy()
 
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                excel_export_df.to_excel(writer, index=False, sheet_name="Mantenimiento Realizado")
-            output.seek(0)
+            excel_bytes = generar_excel_bytes(excel_export_df, "Mantenimiento Realizado")
             st.download_button(
                 "📥 Exportar filtrados a Excel",
-                data=output.getvalue(),
+                data=excel_bytes,
                 file_name="mantenimiento_realizado.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
@@ -2225,8 +2264,8 @@ elif menu == "📋 Reporte Mant. Realizado":
                     
             # Agregar columna de Enlace Ficha pre-autenticada
             df_cd_tabla = pd.DataFrame()
-            user_token = urllib.parse.quote(st.session_state.get("token", ""))
-            user_usr = urllib.parse.quote(st.session_state.get("usuario", ""))
+            user_token = urllib.parse.quote(str(st.session_state.get("token") or ""))
+            user_usr = urllib.parse.quote(str(st.session_state.get("usuario") or ""))
             df_cd_tabla["Ficha"] = df_cd_sorted["id"].apply(lambda x: f"{base_url}/?id_chk={x}&usr={user_usr}&tkn={user_token}")
             
             # Copiar las demás columnas en orden
@@ -2264,13 +2303,10 @@ elif menu == "📋 Reporte Mant. Realizado":
             
             # Exportar a Excel (sin la columna de URL Ficha)
             excel_export_cd = df_cd_tabla_renombrado.drop(columns=["Ficha"]).copy()
-            output_cd = BytesIO()
-            with pd.ExcelWriter(output_cd, engine="openpyxl") as writer:
-                excel_export_cd.to_excel(writer, index=False, sheet_name="Controles Diarios")
-            output_cd.seek(0)
+            excel_cd_bytes = generar_excel_bytes(excel_export_cd, "Controles Diarios")
             st.download_button(
                 "📥 Exportar Controles Diarios a Excel",
-                data=output_cd.getvalue(),
+                data=excel_cd_bytes,
                 file_name="controles_diarios.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
@@ -2573,7 +2609,8 @@ elif menu == "📋 Reporte Movimientos Stock":
         st.warning("No se encontraron registros de movimientos de stock.")
     else:
         # Cálculo de Stock Remanente
-        df_s['Aux_Cant'] = df_s.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
+        cant_s = pd.to_numeric(df_s['Cantidad'], errors='coerce').fillna(0)
+        df_s['Aux_Cant'] = np.where(df_s['Movimiento'] == "Ingreso", cant_s, -cant_s)
         stock_actual = df_s.groupby('Producto')['Aux_Cant'].sum().reset_index()
         stock_actual.columns = ['Producto', 'Stock Remanente']
         
@@ -3185,7 +3222,9 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                     
                     df_val_tabla = df_val_mostrar.sort_values(by="id", ascending=False).copy()
                     df_val_tabla["Fecha"] = df_val_tabla["Fecha"].apply(formatear_fecha_visible)
-                    df_val_tabla["Precio_Litro"] = df_val_tabla.apply(lambda r: (r['Importe'] / r['Cantidad']) if r['Cantidad'] > 0 and r['Importe'] > 0 else 0.0, axis=1)
+                    cant_v = pd.to_numeric(df_val_tabla['Cantidad'], errors='coerce').fillna(0)
+                    imp_v = pd.to_numeric(df_val_tabla['Importe'], errors='coerce').fillna(0)
+                    df_val_tabla["Precio_Litro"] = np.where((cant_v > 0) & (imp_v > 0), imp_v / np.maximum(cant_v, 1e-9), 0.0)
                     
                     cols_val_view = ["id", "Fecha", "Proveedor", "Nro_Factura", "Producto", "Cantidad", "Importe", "Precio_Litro", "Validado_Por", "Fecha_Validacion"]
                     st.dataframe(
@@ -3208,7 +3247,8 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
 
         with tab_historial_h:
             # Cálculo de Stock Remanente para el encabezado
-            df_h['Aux_Cant'] = df_h.apply(lambda x: x['Cantidad'] if x['Movimiento'] == "Ingreso" else -x['Cantidad'], axis=1)
+            cant_h = pd.to_numeric(df_h['Cantidad'], errors='coerce').fillna(0)
+            df_h['Aux_Cant'] = np.where(df_h['Movimiento'] == "Ingreso", cant_h, -cant_h)
             stock_actual = df_h.groupby('Producto')['Aux_Cant'].sum().reset_index()
             stock_actual.columns = ['Producto', 'Stock Remanente (Ltrs)']
 
@@ -3382,15 +3422,12 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             c_exp1, c_exp2 = st.columns(2)
         
             # 1. Excel
-            output_h = BytesIO()
             excel_df_h = df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]].copy()
-            with pd.ExcelWriter(output_h, engine="openpyxl") as writer:
-                excel_df_h.to_excel(writer, index=False, sheet_name="Movimientos Hidrocarburos")
-            output_h.seek(0)
+            excel_h_bytes = generar_excel_bytes(excel_df_h, "Movimientos Hidrocarburos")
         
             c_exp1.download_button(
                 "📊 Exportar a Excel (.xlsx)",
-                data=output_h.getvalue(),
+                data=excel_h_bytes,
                 file_name=f"Reporte_Hidrocarburos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
@@ -3461,14 +3498,10 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 "Relevado (✓ / ✗)": "",
                 "Observaciones / Estado en Planta": ""
             })
-            buf_maq = io.BytesIO()
-            with pd.ExcelWriter(buf_maq, engine='openpyxl') as writer:
-                df_maq_exp.to_excel(writer, sheet_name='Máquinas', index=False)
-            buf_maq.seek(0)
-            
+            buf_maq_bytes = generar_excel_bytes(df_maq_exp, "Máquinas")
             st.download_button(
                 "📥 Exportar Planilla de Máquinas (Excel)",
-                data=buf_maq,
+                data=buf_maq_bytes,
                 file_name="Planilla_Relevamiento_Maquinas.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
@@ -3785,14 +3818,10 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 "Presente / Activo (✓ / ✗)": "",
                 "Firma / Aclaración": ""
             })
-            buf_pers = io.BytesIO()
-            with pd.ExcelWriter(buf_pers, engine='openpyxl') as writer:
-                df_pers_exp.to_excel(writer, sheet_name='Personal', index=False)
-            buf_pers.seek(0)
-            
+            buf_pers_bytes = generar_excel_bytes(df_pers_exp, "Personal")
             st.download_button(
                 "📥 Exportar Planilla de Personal (Excel)",
-                data=buf_pers,
+                data=buf_pers_bytes,
                 file_name="Planilla_Relevamiento_Personal.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
@@ -3832,14 +3861,10 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 "Cantidad Real en Planta": "",
                 "Ubicación / Observaciones": ""
             })
-            buf_rep = io.BytesIO()
-            with pd.ExcelWriter(buf_rep, engine='openpyxl') as writer:
-                df_rep_exp.to_excel(writer, sheet_name='Repuestos', index=False)
-            buf_rep.seek(0)
-            
+            buf_rep_bytes = generar_excel_bytes(df_rep_exp, "Repuestos")
             st.download_button(
                 "📥 Exportar Planilla de Repuestos (Excel)",
-                data=buf_rep,
+                data=buf_rep_bytes,
                 file_name="Planilla_Relevamiento_Repuestos.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
@@ -4068,16 +4093,16 @@ elif menu == "📥 Exportación Global de Datos":
             "controles_diarios": "controles_diarios"
         }
         
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            for clave_nombre, tabla_sql in tablas.items():
-                df = cargar_datos_db(tabla_sql)
-                if not df.empty:
-                    df.to_excel(writer, sheet_name=clave_nombre, index=False)
+        tablas_dict = {}
+        for clave_nombre, tabla_sql in tablas.items():
+            df_t = cargar_datos_db(tabla_sql)
+            if not df_t.empty:
+                tablas_dict[clave_nombre] = df_t
+        excel_global_bytes = generar_excel_multisheet_bytes(tablas_dict)
         
         st.download_button(
             label="💾 Descargar Excel",
-            data=output.getvalue(),
+            data=excel_global_bytes,
             file_name=f"Reporte_Gestion_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
