@@ -664,7 +664,8 @@ def init_db():
     if "Importe" not in columnas_hd:
         cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Importe REAL DEFAULT 0.0")
     if "Estado_Validacion" not in columnas_hd:
-        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Estado_Validacion TEXT DEFAULT 'Validado'")
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Estado_Validacion TEXT DEFAULT 'Pendiente Factura'")
+        cursor.execute("UPDATE hidrocarburos SET Estado_Validacion = 'Validado' WHERE Movimiento != 'Ingreso'")
     if "Fecha_Validacion" not in columnas_hd:
         cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Fecha_Validacion TEXT DEFAULT ''")
     if "Validado_Por" not in columnas_hd:
@@ -699,6 +700,23 @@ def init_db():
     cursor.execute("UPDATE hidrocarburos SET FechaCreacion = Fecha || ' 00:00:00' WHERE FechaCreacion IS NULL")
     cursor.execute("UPDATE hidrocarburos SET HistorialModificaciones = 'Carga inicial o importación.' WHERE HistorialModificaciones IS NULL")
     cursor.execute("UPDATE hidrocarburos SET CreadoPor = 'Desconocido' WHERE CreadoPor IS NULL")
+    
+    # Asegurar que cualquier ingreso que NO tenga factura ni proveedor cargado figure como 'Pendiente Factura'
+    cursor.execute("""
+    UPDATE hidrocarburos 
+    SET Estado_Validacion = 'Pendiente Factura' 
+    WHERE Movimiento = 'Ingreso' 
+      AND (Nro_Factura IS NULL OR trim(Nro_Factura) = '') 
+      AND (Proveedor IS NULL OR trim(Proveedor) = '')
+      AND (Validado_Por IS NULL OR trim(Validado_Por) = '')
+    """)
+    # Asegurar que los egresos (consumos internos de equipos) queden como 'Validado'
+    cursor.execute("""
+    UPDATE hidrocarburos 
+    SET Estado_Validacion = 'Validado' 
+    WHERE Movimiento != 'Ingreso' 
+      AND (Estado_Validacion IS NULL OR Estado_Validacion = '' OR Estado_Validacion = 'Pendiente Factura')
+    """)
     
     # Índices de alto rendimiento para acelerar consultas y soportar decenas de miles de registros
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_mantenimientos_fecha ON mantenimientos(Fecha)")
@@ -1533,7 +1551,12 @@ else:
 conn_sb = get_connection()
 cursor_sb = conn_sb.cursor()
 try:
-    cursor_sb.execute("SELECT COUNT(*) FROM hidrocarburos WHERE Movimiento = 'Ingreso' AND (Estado_Validacion = 'Pendiente Factura' OR Estado_Validacion IS NULL OR Estado_Validacion = '')")
+    cursor_sb.execute("""
+    SELECT COUNT(*) FROM hidrocarburos 
+    WHERE Movimiento = 'Ingreso' 
+      AND (Estado_Validacion = 'Pendiente Factura' OR Estado_Validacion IS NULL OR Estado_Validacion = ''
+           OR ((Nro_Factura IS NULL OR trim(Nro_Factura) = '') AND (Proveedor IS NULL OR trim(Proveedor) = '') AND (Validado_Por IS NULL OR trim(Validado_Por) = '')))
+    """)
     cnt_facturas_pendientes = cursor_sb.fetchone()[0]
 except:
     cnt_facturas_pendientes = 0
@@ -2785,7 +2808,8 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             with c_head1:
                 st.markdown(f"### ⛽ **{r_d['Producto']}** — **{r_d['Cantidad']:,.1f} Litros** ({r_d['Movimiento']})")
                 if r_d['Movimiento'] == "Ingreso":
-                    if str(r_d.get('Estado_Validacion', '')).strip() == "Validado":
+                    tiene_factura = bool(str(r_d.get('Nro_Factura', '')).strip() or str(r_d.get('Proveedor', '')).strip() or str(r_d.get('Validado_Por', '')).strip())
+                    if str(r_d.get('Estado_Validacion', '')).strip() == "Validado" and tiene_factura:
                         st.markdown("<span class='badge-operativo'>🟢 FACTURA VINCULADA Y VALIDADA</span>", unsafe_allow_html=True)
                     else:
                         st.markdown("<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span>", unsafe_allow_html=True)
@@ -2981,15 +3005,23 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             df_pendientes = df_h[df_h['Movimiento'] == "Ingreso"].copy()
             if not df_pendientes.empty:
                 df_pendientes = df_pendientes[
-                    df_pendientes['Estado_Validacion'].isin(["Pendiente Factura", "", None]) | 
-                    df_pendientes['Estado_Validacion'].isna()
+                    (df_pendientes['Estado_Validacion'].isin(["Pendiente Factura", "", None]) | df_pendientes['Estado_Validacion'].isna()) |
+                    ((df_pendientes['Nro_Factura'].fillna('').astype(str).str.strip() == '') & 
+                     (df_pendientes['Proveedor'].fillna('').astype(str).str.strip() == '') & 
+                     (df_pendientes['Validado_Por'].fillna('').astype(str).str.strip() == ''))
                 ].copy()
             
             c_k1, c_k2, c_k3 = st.columns(3)
             total_ing_pend = len(df_pendientes) if not df_pendientes.empty else 0
             litros_pend = df_pendientes['Cantidad'].sum() if not df_pendientes.empty else 0.0
             
-            df_validados = df_h[(df_h['Movimiento'] == "Ingreso") & (df_h['Estado_Validacion'] == "Validado")].copy()
+            df_validados = df_h[
+                (df_h['Movimiento'] == "Ingreso") & 
+                (df_h['Estado_Validacion'] == "Validado") & 
+                ((df_h['Nro_Factura'].fillna('').astype(str).str.strip() != '') | 
+                 (df_h['Proveedor'].fillna('').astype(str).str.strip() != '') | 
+                 (df_h['Validado_Por'].fillna('').astype(str).str.strip() != ''))
+            ].copy()
             total_ing_val = len(df_validados) if not df_validados.empty else 0
             litros_val = df_validados['Cantidad'].sum() if not df_validados.empty else 0.0
             
@@ -3179,14 +3211,18 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             df_mostrar_sorted["Operario"] = df_mostrar_sorted["Operario"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
         
             # Badge de Estado de Validación
-            def badge_validacion(val, mov):
+            def badge_validacion(val, mov, prov="", fact="", val_por=""):
                 if mov != "Ingreso":
                     return "⚪ Salida Consumo"
-                if str(val).strip() == "Validado":
+                tiene_fact = bool(str(prov).strip() or str(fact).strip() or str(val_por).strip())
+                if str(val).strip() == "Validado" and tiene_fact:
                     return "🟢 Factura Vinculada"
                 return "🟡 Pendiente Factura"
             
-            df_mostrar_sorted["Estado_Val_Badge"] = df_mostrar_sorted.apply(lambda r: badge_validacion(r.get('Estado_Validacion', ''), r.get('Movimiento', '')), axis=1)
+            df_mostrar_sorted["Estado_Val_Badge"] = df_mostrar_sorted.apply(
+                lambda r: badge_validacion(r.get('Estado_Validacion', ''), r.get('Movimiento', ''), r.get('Proveedor', ''), r.get('Nro_Factura', ''), r.get('Validado_Por', '')),
+                axis=1
+            )
 
             cols_a_mostrar = ["id", "Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario", "Estado_Val_Badge", "Proveedor", "Nro_Factura"]
             event_df_h = st.dataframe(
