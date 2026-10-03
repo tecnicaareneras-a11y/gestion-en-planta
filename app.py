@@ -1447,6 +1447,8 @@ def mostrar_registro_hidro_qr(prod_pre=None):
         destino = c2.selectbox("Destino", ["Stock Central"] + maquinas_list_db, index=None, placeholder="Escribe para buscar destino...")
         operario = st.selectbox("Responsable / Técnico", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar responsable...")
         
+        prov_qr = st.text_input("🏢 Proveedor / Empresa Distribuidora (opcional si es Ingreso):", placeholder="Ej: YPF Directo, Axion, Shell, Distribuidor...").strip()
+        
         btn_guardar = st.form_submit_button("💾 Cargar Registro de Hidrocarburos", use_container_width=True)
         if btn_guardar:
             if not producto:
@@ -1464,10 +1466,11 @@ def mostrar_registro_hidro_qr(prod_pre=None):
                 usr_hd = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 hist_hd = f"{fecha_creacion_hd} - Registrado por usuario: {usr_hd} (Vía QR)"
                 est_val = "Pendiente Factura" if movimiento == "Ingreso" else "Validado"
+                prov_final_qr = prov_qr if movimiento == "Ingreso" else ""
                 cursor.execute("""
                 INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor, Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (fecha_mov.strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd, "", "", 0.0, est_val, "", ""))
+                """, (fecha_mov.strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd, prov_final_qr, "", 0.0, est_val, "", ""))
                 guardar_cambios_db(conn)
                 if movimiento == "Ingreso":
                     st.success("🎉 ¡Ingreso de Hidrocarburos guardado con éxito! Se notificó a Administración para la vinculación de la factura/remito.")
@@ -1516,6 +1519,24 @@ for default_h in ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de L
 
 # El resto son repuestos e insumos generales
 productos_list = [p for p in all_products if not any(k in p.lower() for k in hidro_keywords)]
+
+# Catálogo dinámico de proveedores de combustibles e hidrocarburos
+def obtener_lista_proveedores():
+    provs = ["YPF Directo", "Axion Energy", "Shell / Raízen", "Puma Energy", "DAPSA", "Distribuidor Mayorista"]
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT Proveedor FROM hidrocarburos WHERE Proveedor IS NOT NULL AND trim(Proveedor) != ''")
+        for r in cur.fetchall():
+            p = r[0].strip()
+            if p and p not in provs:
+                provs.append(p)
+        conn.close()
+    except Exception:
+        pass
+    return provs
+
+proveedores_list = obtener_lista_proveedores()
 
 # --- INTERFAZ LATERAL ---
 st.sidebar.title("🛠️ GESTIÓN TÉCNICA")
@@ -3031,66 +3052,159 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             
             st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
             
-            if df_pendientes.empty:
-                st.success("🟢 **¡Excelente! No hay ingresos pendientes de factura.** Todas las recepciones físicas de combustible en planta cuentan con su comprobante cargado.")
-            else:
-                st.warning(f"⚠️ **Atención:** Hay **{total_ing_pend} recepción(es) de combustible** ingresadas en planta que aún no tienen cargada la factura o remito. Completa los datos a continuación para validar cada carga y apagar la señal de alerta:")
-                
-                for _, r_pend in df_pendientes.sort_values(by="id", ascending=False).iterrows():
-                    p_id = r_pend['id']
-                    with st.container(border=True):
-                        cp1, cp2 = st.columns([2.8, 1.2])
-                        with cp1:
-                            st.markdown(f"### ⛽ **{r_pend['Producto']}** — **{r_pend['Cantidad']:,.0f} Litros**")
-                            st.markdown(f"<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span> &nbsp; <span class='badge-operativo'>📍 Destino: {r_pend['Destino']}</span>", unsafe_allow_html=True)
-                            f_vis = formatear_fecha_visible(r_pend['Fecha'])
-                            op_vis = r_pend['Operario'] if pd.notna(r_pend['Operario']) and str(r_pend['Operario']).strip() else 'No especificado'
-                            crea_vis = r_pend.get('CreadoPor', 'Desconocido')
-                            f_crea_vis = formatear_fecha_hora_visible(r_pend.get('FechaCreacion', ''))
-                            st.caption(f"📅 **Fecha Recepción:** {f_vis} | 👤 **Recibió en Planta:** {op_vis} | ⏱️ **Cargado por:** {crea_vis} ({f_crea_vis})")
-                        
-                        with cp2:
-                            with st.popover("📝 Cargar Factura y Validar", use_container_width=True):
-                                st.markdown(f"##### 🧾 Vincular Comprobante a Ingreso #{p_id}")
-                                st.write(f"**{r_pend['Producto']}** — {r_pend['Cantidad']:,.0f} Lts ({f_vis})")
-                                with st.form(f"form_val_ing_{p_id}"):
-                                    val_prov = st.text_input("Proveedor", placeholder="Ej: YPF Directo / Axion / Distribuidor").strip()
-                                    val_fact = st.text_input("N° de Factura / Remito", placeholder="Ej: A-0001-00045678").strip()
-                                    val_imp = st.number_input("Importe Total ($)", min_value=0.0, step=100.0)
-                                    if val_imp > 0 and float(r_pend['Cantidad']) > 0:
-                                        st.caption(f"💵 Precio unitario estimado: **${val_imp / float(r_pend['Cantidad']):.2f} / Litro**")
-                                    val_obs = st.text_input("Observaciones / Notas adicionales (opcional)", placeholder="Ej: Factura cancelada, orden de compra 402")
-                                    
-                                    btn_sub_val = st.form_submit_button("💾 Confirmar y Validar Ingreso", use_container_width=True)
-                                    if btn_sub_val:
-                                        if not val_prov and not val_fact:
-                                            st.error("⚠️ Por favor ingresa al menos el proveedor o el número de factura/remito.")
-                                        else:
-                                            conn_v = get_connection()
-                                            cur_v = conn_v.cursor()
-                                            now_str_v = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                            usr_v = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Administración"))
-                                            
-                                            log_v = f"{now_str_v} - Factura validada por {usr_v}: Prov '{val_prov}', Fact '{val_fact}', Imp ${val_imp:,.2f}"
-                                            if val_obs:
-                                                log_v += f" | Obs: {val_obs}"
-                                            hist_prev_v = str(r_pend.get('HistorialModificaciones', '')) if pd.notna(r_pend.get('HistorialModificaciones')) else ""
-                                            hist_new_v = (hist_prev_v + "\n" + log_v).strip()
-                                            
-                                            cur_v.execute("""
-                                            UPDATE hidrocarburos SET
-                                                Proveedor = ?,
-                                                Nro_Factura = ?,
-                                                Importe = ?,
-                                                Estado_Validacion = 'Validado',
-                                                Fecha_Validacion = ?,
-                                                Validado_Por = ?,
-                                                HistorialModificaciones = ?
-                                            WHERE id = ?
-                                            """, (val_prov, val_fact, val_imp, now_str_v, usr_v, hist_new_v, p_id))
-                                            guardar_cambios_db(conn_v)
-                                            st.success("🎉 ¡Ingreso validado con éxito! La alerta se ha apagado.")
-                                            st.rerun()
+            subtab_pend, subtab_val = st.tabs([
+                f"⚠️ Ingresos Físicos Pendientes de Factura ({total_ing_pend})",
+                f"✅ Facturas y Remitos Validados ({total_ing_val})"
+            ])
+            
+            with subtab_pend:
+                if df_pendientes.empty:
+                    st.success("🟢 **¡Excelente! No hay ingresos pendientes de factura.** Todas las recepciones físicas de combustible en planta cuentan con su comprobante cargado.")
+                else:
+                    # Casilleros de indicación y filtrado por Proveedor
+                    c_fp1, c_fp2 = st.columns([2, 1])
+                    filtro_prov_pend = c_fp1.selectbox("🏢 Indicar / Filtrar por Proveedor:", ["Todos los Proveedores"] + proveedores_list, key="sb_prov_pend")
+                    buscar_pend = c_fp2.text_input("🔍 Buscar:", placeholder="Remito, técnico, destino...", key="txt_buscar_pend")
+                    
+                    df_pend_filtrado = df_pendientes.copy()
+                    if filtro_prov_pend != "Todos los Proveedores":
+                        df_pend_filtrado = df_pend_filtrado[df_pend_filtrado['Proveedor'].astype(str).str.contains(filtro_prov_pend, case=False, na=False)]
+                    if buscar_pend.strip():
+                        b_term = buscar_pend.strip().lower()
+                        df_pend_filtrado = df_pend_filtrado[
+                            df_pend_filtrado['Producto'].astype(str).str.lower().str.contains(b_term) |
+                            df_pend_filtrado['Operario'].astype(str).str.lower().str.contains(b_term) |
+                            df_pend_filtrado['Destino'].astype(str).str.lower().str.contains(b_term) |
+                            df_pend_filtrado['Proveedor'].astype(str).str.lower().str.contains(b_term) |
+                            df_pend_filtrado['Nro_Factura'].astype(str).str.lower().str.contains(b_term)
+                        ]
+                    
+                    st.warning(f"⚠️ **Atención:** Hay **{len(df_pend_filtrado)} recepción(es) de combustible** mostradas. Completa el proveedor, factura e importe para validar cada carga:")
+                    
+                    for _, r_pend in df_pend_filtrado.sort_values(by="id", ascending=False).iterrows():
+                        p_id = r_pend['id']
+                        prov_actual = str(r_pend.get('Proveedor', '')).strip()
+                        with st.container(border=True):
+                            cp1, cp2 = st.columns([2.5, 1.5])
+                            with cp1:
+                                st.markdown(f"### ⛽ **{r_pend['Producto']}** — **{r_pend['Cantidad']:,.0f} Litros**")
+                                if prov_actual:
+                                    st.markdown(f"<span class='badge-operativo'>🏢 Proveedor: {prov_actual}</span> &nbsp; <span class='badge-revision'>🟡 PENDIENTE FACTURA</span> &nbsp; <span class='badge-operativo'>📍 Destino: {r_pend['Destino']}</span>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span> &nbsp; <span class='badge-operativo'>📍 Destino: {r_pend['Destino']}</span>", unsafe_allow_html=True)
+                                f_vis = formatear_fecha_visible(r_pend['Fecha'])
+                                op_vis = r_pend['Operario'] if pd.notna(r_pend['Operario']) and str(r_pend['Operario']).strip() else 'No especificado'
+                                crea_vis = r_pend.get('CreadoPor', 'Desconocido')
+                                f_crea_vis = formatear_fecha_hora_visible(r_pend.get('FechaCreacion', ''))
+                                st.caption(f"📅 **Fecha Recepción:** {f_vis} | 👤 **Recibió en Planta:** {op_vis} | ⏱️ **Cargado por:** {crea_vis} ({f_crea_vis})")
+                            
+                            with cp2:
+                                with st.popover("📝 Cargar Factura / Indicar Proveedor", use_container_width=True):
+                                    st.markdown(f"##### 🧾 Vincular Comprobante a Ingreso #{p_id}")
+                                    st.write(f"**{r_pend['Producto']}** — {r_pend['Cantidad']:,.0f} Lts ({f_vis})")
+                                    with st.form(f"form_val_ing_{p_id}"):
+                                        opciones_prov_form = ["-- Seleccionar Proveedor --"] + proveedores_list + ["Otro (Escribir nombre)"]
+                                        idx_def_p = opciones_prov_form.index(prov_actual) if prov_actual in opciones_prov_form else 0
+                                        prov_sel_form = st.selectbox("🏢 Proveedor:", opciones_prov_form, index=idx_def_p, key=f"sel_pv_{p_id}")
+                                        prov_txt_custom = st.text_input("Nombre de Proveedor (si seleccionaste 'Otro' o deseas cambiarlo):", value=prov_actual if idx_def_p == 0 and prov_actual else "", placeholder="Ej: YPF Directo / Axion / Distribuidor").strip()
+                                        
+                                        val_fact = st.text_input("N° de Factura / Remito", placeholder="Ej: A-0001-00045678").strip()
+                                        val_imp = st.number_input("Importe Total ($)", min_value=0.0, step=100.0)
+                                        if val_imp > 0 and float(r_pend['Cantidad']) > 0:
+                                            st.caption(f"💵 Precio unitario estimado: **${val_imp / float(r_pend['Cantidad']):.2f} / Litro**")
+                                        val_obs = st.text_input("Observaciones / Notas adicionales (opcional)", placeholder="Ej: Factura cancelada, orden de compra 402")
+                                        
+                                        btn_sub_val = st.form_submit_button("💾 Confirmar y Validar Ingreso", use_container_width=True)
+                                        if btn_sub_val:
+                                            # Determinar el proveedor final elegido
+                                            if prov_txt_custom:
+                                                val_prov_final = prov_txt_custom
+                                            elif prov_sel_form != "-- Seleccionar Proveedor --" and prov_sel_form != "Otro (Escribir nombre)":
+                                                val_prov_final = prov_sel_form
+                                            else:
+                                                val_prov_final = ""
+                                                
+                                            if not val_prov_final and not val_fact:
+                                                st.error("⚠️ Por favor indica al menos el proveedor o el número de factura/remito.")
+                                            else:
+                                                conn_v = get_connection()
+                                                cur_v = conn_v.cursor()
+                                                now_str_v = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                                usr_v = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Administración"))
+                                                
+                                                log_v = f"{now_str_v} - Factura validada por {usr_v}: Prov '{val_prov_final}', Fact '{val_fact}', Imp ${val_imp:,.2f}"
+                                                if val_obs:
+                                                    log_v += f" | Obs: {val_obs}"
+                                                hist_prev_v = str(r_pend.get('HistorialModificaciones', '')) if pd.notna(r_pend.get('HistorialModificaciones')) else ""
+                                                hist_new_v = (hist_prev_v + "\n" + log_v).strip()
+                                                
+                                                cur_v.execute("""
+                                                UPDATE hidrocarburos SET
+                                                    Proveedor = ?,
+                                                    Nro_Factura = ?,
+                                                    Importe = ?,
+                                                    Estado_Validacion = 'Validado',
+                                                    Fecha_Validacion = ?,
+                                                    Validado_Por = ?,
+                                                    HistorialModificaciones = ?
+                                                WHERE id = ?
+                                                """, (val_prov_final, val_fact, val_imp, now_str_v, usr_v, hist_new_v, p_id))
+                                                guardar_cambios_db(conn_v)
+                                                st.success("🎉 ¡Ingreso validado con éxito! La alerta se ha apagado.")
+                                                st.rerun()
+
+            with subtab_val:
+                if df_validados.empty:
+                    st.info("ℹ️ Aún no hay facturas validadas cargadas en el sistema. A medida que valides los ingresos pendientes de la otra pestaña, aparecerán registradas aquí.")
+                else:
+                    c_fv1, c_fv2 = st.columns([2, 1])
+                    filtro_prov_val_t = c_fv1.selectbox("🏢 Filtrar por Proveedor:", ["Todos los Proveedores"] + proveedores_list, key="sb_prov_val_tab")
+                    buscar_val_t = c_fv2.text_input("🔍 Buscar:", placeholder="Factura, proveedor, producto...", key="txt_buscar_val_tab")
+                    
+                    df_val_mostrar = df_validados.copy()
+                    if filtro_prov_val_t != "Todos los Proveedores":
+                        df_val_mostrar = df_val_mostrar[df_val_mostrar['Proveedor'].astype(str).str.contains(filtro_prov_val_t, case=False, na=False)]
+                    if buscar_val_t.strip():
+                        b_val = buscar_val_t.strip().lower()
+                        df_val_mostrar = df_val_mostrar[
+                            df_val_mostrar['Producto'].astype(str).str.lower().str.contains(b_val) |
+                            df_val_mostrar['Proveedor'].astype(str).str.lower().str.contains(b_val) |
+                            df_val_mostrar['Nro_Factura'].astype(str).str.lower().str.contains(b_val) |
+                            df_val_mostrar['Validado_Por'].astype(str).str.lower().str.contains(b_val)
+                        ]
+                    
+                    # Métricas de facturación validada
+                    total_imp_val = df_val_mostrar['Importe'].sum() if not df_val_mostrar.empty else 0.0
+                    total_lts_val = df_val_mostrar['Cantidad'].sum() if not df_val_mostrar.empty else 0.0
+                    cm_v1, cm_v2, cm_v3 = st.columns(3)
+                    cm_v1.metric("Facturas Mostradas", len(df_val_mostrar))
+                    cm_v2.metric("Total Litros Facturados", f"{total_lts_val:,.0f} Lts")
+                    cm_v3.metric("Monto Total Invertido", f"${total_imp_val:,.2f}")
+                    
+                    st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+                    
+                    df_val_tabla = df_val_mostrar.sort_values(by="id", ascending=False).copy()
+                    df_val_tabla["Fecha"] = df_val_tabla["Fecha"].apply(formatear_fecha_visible)
+                    df_val_tabla["Precio_Litro"] = df_val_tabla.apply(lambda r: (r['Importe'] / r['Cantidad']) if r['Cantidad'] > 0 and r['Importe'] > 0 else 0.0, axis=1)
+                    
+                    cols_val_view = ["id", "Fecha", "Proveedor", "Nro_Factura", "Producto", "Cantidad", "Importe", "Precio_Litro", "Validado_Por", "Fecha_Validacion"]
+                    st.dataframe(
+                        df_val_tabla[cols_val_view],
+                        column_config={
+                            "id": st.column_config.NumberColumn("ID", format="%d", width="small"),
+                            "Fecha": st.column_config.TextColumn("Fecha Recepción"),
+                            "Proveedor": st.column_config.TextColumn("Proveedor"),
+                            "Nro_Factura": st.column_config.TextColumn("Factura/Remito"),
+                            "Producto": st.column_config.TextColumn("Producto"),
+                            "Cantidad": st.column_config.NumberColumn("Litros", format="%.1f Lts"),
+                            "Importe": st.column_config.NumberColumn("Importe Total", format="$%.2f"),
+                            "Precio_Litro": st.column_config.NumberColumn("Precio/Litro", format="$%.2f"),
+                            "Validado_Por": st.column_config.TextColumn("Validado Por"),
+                            "Fecha_Validacion": st.column_config.TextColumn("Fecha Validación")
+                        },
+                        use_container_width=True,
+                        hide_index=True
+                    )
 
         with tab_historial_h:
             # Cálculo de Stock Remanente para el encabezado
@@ -3121,7 +3235,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             df_h['Mes'] = df_h['Mes_num'].map(nombres_meses)
         
             # Filtros opcionales para facilitar la lectura
-            col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+            col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
             filtro_prod = col_f1.multiselect("Filtrar por Producto", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"], default=["Gas-oil"])
             filtro_mov = col_f2.selectbox("Movimiento", ["Todos", "Ingreso", "Egreso"])
         
@@ -3129,6 +3243,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             filtro_anio = col_f3.selectbox("Año", ["Todos"] + anios_disponibles)
         
             filtro_mes = col_f4.selectbox("Mes", ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"])
+            filtro_prov = col_f5.selectbox("🏢 Proveedor", ["Todos"] + proveedores_list)
 
             df_mostrar = df_h.copy()
             if filtro_prod:
@@ -3139,6 +3254,8 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                 df_mostrar = df_mostrar[df_mostrar['Año'] == int(filtro_anio)]
             if filtro_mes != "Todos":
                 df_mostrar = df_mostrar[df_mostrar['Mes'] == filtro_mes]
+            if filtro_prov != "Todos":
+                df_mostrar = df_mostrar[df_mostrar['Proveedor'] == filtro_prov]
 
             # Calcular métricas del período filtrado (Las "otras métricas" solicitadas)
             ingresos_periodo = df_mostrar[df_mostrar['Movimiento'] == "Ingreso"]['Cantidad'].sum()
