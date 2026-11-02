@@ -421,7 +421,16 @@ def generar_pdf_hidrocarburos(df_reporte, filtro_prod_str, filtro_mov_str, filtr
         except:
             cant_num = 0.0
         cant_val = f'{cant_num:,.1f} Lts'
-        dest_val = clean_txt(str(r.get('Destino', ''))[:25])
+        raw_dest = str(r.get('Destino', '')).strip()
+        raw_obs = str(r.get('Observaciones', '')).strip()
+        if raw_obs and raw_obs.lower() not in ('nan', 'none', '-'):
+            if raw_dest.upper() == 'OTROS':
+                dest_full = f"OTROS: {raw_obs}"
+            else:
+                dest_full = f"{raw_dest} ({raw_obs})"
+        else:
+            dest_full = raw_dest
+        dest_val = clean_txt(dest_full[:26])
         oper_val = clean_txt(str(r.get('Operario', ''))[:20])
 
         pdf.cell(col_w[0], 6, fecha_val, border=1, fill=True, align='C')
@@ -494,6 +503,95 @@ def buscar_coincidencia_empleado(usuario, lista_empleados):
         return mejor_idx
         
     return None
+
+# --- DETECCIÓN INTELIGENTE Y PROTECCIÓN DE CARGAS DE COMBUSTIBLE ---
+EQUIPOS_VIRTUALES_COMBUSTIBLE = {
+    "stock central gas-oil",
+    "stock central gas oil",
+    "stock central gasoil",
+    "stock central",
+    "gas oil",
+    "gas-oil",
+    "gasoil",
+    "hidrocarburo",
+    "hidrocarburos",
+    "combustible",
+}
+
+EQUIPOS_SURTIDOR_COMBUSTIBLE = {
+    "surtidor de gas oil",
+    "surtidor gas oil",
+    "surtidor gas-oil",
+    "surtidor gasoil",
+}
+
+def es_equipo_virtual_combustible(nombre_maq):
+    if not nombre_maq:
+        return False
+    n = str(nombre_maq).strip().lower()
+    return n in EQUIPOS_VIRTUALES_COMBUSTIBLE or n.startswith("stock central gas")
+
+def es_surtidor_combustible(nombre_maq):
+    if not nombre_maq:
+        return False
+    n = str(nombre_maq).strip().lower()
+    return n in EQUIPOS_SURTIDOR_COMBUSTIBLE or n.startswith("surtidor")
+
+def detectar_carga_combustible_en_mantenimiento(maquina, detalle_texto, hay_tareas_mecanicas=False):
+    """
+    Detecta si un operario está intentando registrar una carga/descarga de combustible
+    dentro del formulario de Mantenimiento Mecánico.
+    Retorna (es_combustible: bool, motivo: str).
+    """
+    if es_equipo_virtual_combustible(maquina):
+        return True, f"'{maquina}' corresponde al Stock Central de Combustibles y no a una máquina mecánica."
+
+    txt = str(detalle_texto or "").strip().lower()
+    if not txt:
+        return False, ""
+
+    import re
+    tiene_litros = bool(re.search(r'\b\d+[\.,]?\d*\s*(?:litros|litro|lts|ltrs|lt)\b', txt))
+    tiene_combustible = bool(re.search(r'\b(?:gas\s*-?\s*oil|gasoil|combustible|hidrocarburo|ypf|axion|shell|puma\s+energy|dapsa)\b', txt))
+    tiene_verbo_mov = bool(re.search(r'\b(?:ingreso|entrada|carga|descarga|recepci[oó]n|egreso|despacho|consumo)\b', txt))
+
+    if not hay_tareas_mecanicas and tiene_litros and tiene_combustible:
+        return True, "El texto describe un ingreso o carga de litros de combustible."
+    if es_surtidor_combustible(maquina) and tiene_litros and (tiene_combustible or tiene_verbo_mov):
+        return True, "Estás registrando litros despachados/ingresados en el surtidor dentro de Mantenimiento."
+    return False, ""
+
+def extraer_datos_combustible_de_texto(maquina, detalle_texto):
+    """
+    Extrae litros, tipo de movimiento y proveedor sugerido a partir del detalle de un reporte mal clasificado.
+    """
+    import re
+    txt = str(detalle_texto or "").strip()
+    txt_low = txt.lower()
+
+    # 1. Cantidad de litros
+    cant = 0.0
+    m_lts = re.search(r'(\d+(?:[\.,]\d+)?)\s*(?:litros|litro|lts|ltrs|lt)\b', txt_low)
+    if m_lts:
+        try:
+            cant = float(m_lts.group(1).replace(",", "."))
+        except Exception:
+            cant = 0.0
+
+    # 2. Movimiento (Ingreso vs Egreso)
+    if es_equipo_virtual_combustible(maquina) or re.search(r'\b(?:ingreso|entrada|recepci[oó]n|descarga)\b', txt_low):
+        mov = "Ingreso"
+    else:
+        mov = "Egreso"
+
+    # 3. Proveedor sugerido
+    prov = ""
+    for cand, label in [("ypf", "YPF"), ("axion", "Axion Energy"), ("shell", "Shell / Raízen"), ("puma", "Puma Energy"), ("dapsa", "DAPSA"), ("tank", "TANK")]:
+        if re.search(rf'\b{cand}\b', txt_low):
+            prov = label
+            break
+
+    return cant, mov, prov
 
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gestion_planta.db")
 
@@ -621,7 +719,14 @@ def init_db():
         Operario TEXT,
         FechaCreacion TEXT,
         HistorialModificaciones TEXT,
-        CreadoPor TEXT
+        CreadoPor TEXT,
+        Proveedor TEXT DEFAULT '',
+        Nro_Factura TEXT DEFAULT '',
+        Importe REAL DEFAULT 0.0,
+        Estado_Validacion TEXT DEFAULT 'Pendiente Factura',
+        Fecha_Validacion TEXT DEFAULT '',
+        Validado_Por TEXT DEFAULT '',
+        Observaciones TEXT DEFAULT ''
     )
     """)
     
@@ -729,6 +834,8 @@ def init_db():
         cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Fecha_Validacion TEXT DEFAULT ''")
     if "Validado_Por" not in columnas_hd:
         cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Validado_Por TEXT DEFAULT ''")
+    if "Observaciones" not in columnas_hd:
+        cursor.execute("ALTER TABLE hidrocarburos ADD COLUMN Observaciones TEXT DEFAULT ''")
         
     # Asegurar que existan las nuevas columnas en controles_diarios si ya existe la tabla
     cursor.execute("PRAGMA table_info(controles_diarios)")
@@ -787,6 +894,51 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_producto ON stock(Producto)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_controles_fecha ON controles_diarios(Fecha)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_planificacion_maquina ON planificacion(Maquina)")
+
+    # Reclasificación automática e idempotente de cargas de combustible ingresadas por error en Mantenimiento (QR 'Stock Central Gas-Oil')
+    cursor.execute("""
+    SELECT id, Fecha, Maquina, Operario, Detalle, Deposito, FechaCreacion, HistorialModificaciones, CreadoPor
+    FROM mantenimientos
+    WHERE lower(trim(Maquina)) IN ('stock central gas-oil', 'stock central gas oil', 'stock central gasoil')
+       OR (id = 555 AND lower(trim(Maquina)) = 'surtidor de gas oil')
+    ORDER BY id ASC
+    """)
+    mants_comb_err = cursor.fetchall()
+    for m_row in mants_comb_err:
+        m_id, m_fecha, m_maq, m_op, m_det, m_dep, m_fcrea, m_hist, m_cpor = m_row
+        cant_ext, mov_ext, prov_ext = extraer_datos_combustible_de_texto(m_maq, m_det)
+        if cant_ext > 0:
+            cursor.execute(
+                "SELECT COUNT(*) FROM hidrocarburos WHERE Fecha = ? AND Movimiento = ? AND abs(Cantidad - ?) < 1.0",
+                (m_fecha, mov_ext, cant_ext)
+            )
+            ya_existe = cursor.fetchone()[0] > 0
+            if not ya_existe:
+                dest_mig = "Stock Central" if mov_ext == "Ingreso" else "Buque Maria Ana"
+                est_mig = "Pendiente Factura" if mov_ext == "Ingreso" else "Validado"
+                obs_mig = f"{str(m_det or '').strip()} ({m_dep})".strip() if m_dep else str(m_det or '').strip()
+                hist_mig = (
+                    f"{m_fcrea or (str(m_fecha) + ' 00:00:00')} - Cargado vía QR por {m_cpor or m_op or 'Operario'}.\n"
+                    f"Reclasificado automáticamente desde Ficha de Mantenimiento #{m_id} al Balance de Hidrocarburos."
+                )
+                cursor.execute("""
+                INSERT INTO hidrocarburos (
+                    Fecha, Producto, Movimiento, Cantidad, Destino, Operario,
+                    FechaCreacion, HistorialModificaciones, CreadoPor,
+                    Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por, Observaciones
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    m_fecha, "Gas-oil", mov_ext, cant_ext, dest_mig, m_op or "",
+                    m_fcrea or "", hist_mig, m_cpor or m_op or "Operario",
+                    prov_ext, "", 0.0, est_mig, "", "", obs_mig
+                ))
+            cursor.execute("DELETE FROM mantenimientos WHERE id = ?", (m_id,))
+
+    # Limpiar entradas virtuales de stock de combustible del catálogo de máquinas mecánicas
+    cursor.execute("""
+    DELETE FROM maquinas
+    WHERE lower(trim(Nombre)) IN ('stock central gas-oil', 'stock central gas oil', 'stock central gasoil')
+    """)
     
     conn.commit()
     
@@ -1237,6 +1389,66 @@ def mostrar_detalle_independiente(detail_id):
                         st.query_params.clear()
                         st.rerun()
 
+    # --- HERRAMIENTA DE RECLASIFICACIÓN A HIDROCARBUROS (SI UN OPERARIO CARGÓ COMBUSTIBLE EN MANTENIMIENTO POR ERROR) ---
+    es_posible_comb, motivo_det_comb = detectar_carga_combustible_en_mantenimiento(registro["Maquina"], registro["Detalle"], False)
+    cant_sug, mov_sug, prov_sug = extraer_datos_combustible_de_texto(registro["Maquina"], registro["Detalle"])
+    if es_posible_comb:
+        st.warning(f"⚠️ **Posible carga de combustible detectada en Mantenimiento:** {motivo_det_comb} Puedes trasladarla en 1 clic al Balance de Stock de Hidrocarburos aquí abajo:")
+
+    with st.expander("⛽ ¿Este reporte era una carga de Combustible / Lubricante? Mover al Balance de Hidrocarburos", expanded=es_posible_comb):
+        st.caption("Traslada este registro a la sección de Hidrocarburos para que sume/reste en el Balance de Stock, genere la alerta de factura pendiente (si es Ingreso) y deje de figurar como mantenimiento mecánico.")
+        destinos_reclasif = ["Stock Central", "OTROS"] + [m for m in maquinas_list_db if not es_equipo_virtual_combustible(m) and m not in ("Stock Central", "OTROS")]
+        idx_dest_sug = 0
+        if mov_sug == "Egreso" and registro["Maquina"] in destinos_reclasif:
+            idx_dest_sug = destinos_reclasif.index(registro["Maquina"])
+
+        with st.form(f"form_reclasificar_hidro_{detail_id}"):
+            cr1, cr2, cr3 = st.columns(3)
+            mov_rec = cr1.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if mov_sug == "Ingreso" else 1)
+            prod_rec = cr1.selectbox("Producto", ["Gas-oil", "Aceite Motor 15W40", "Hidráulico 68", "Grasa de Litio"])
+            cant_rec = cr2.number_input("Cantidad (Litros)", min_value=0.0, value=float(cant_sug), step=10.0)
+            dest_rec = cr2.selectbox("Destino", destinos_reclasif, index=idx_dest_sug)
+            prov_rec = cr3.text_input("Proveedor (si es Ingreso)", value=prov_sug, placeholder="Ej: YPF / Axion")
+            pass_rec = cr3.text_input("🔑 Tu contraseña para confirmar", type="password")
+            obs_rec = st.text_input("📝 Observaciones / Detalle", value=str(registro["Detalle"]).strip())
+
+            if st.form_submit_button("⛽ Confirmar y Mover a Balance de Hidrocarburos", use_container_width=True):
+                usr_act_rec = st.session_state.get("usuario", "")
+                if not verificar_password_usuario(usr_act_rec, pass_rec):
+                    st.error("🔒 Contraseña incorrecta o no ingresada.")
+                elif cant_rec <= 0:
+                    st.error("⚠️ Ingresa una cantidad de litros mayor a 0.")
+                elif dest_rec == "OTROS" and not obs_rec.strip():
+                    st.error("⚠️ Si el destino es 'OTROS', especifica el destinatario en Observaciones.")
+                else:
+                    now_rec = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    usr_nom_rec = st.session_state.get("nombre_completo", usr_act_rec or "Administración")
+                    est_val_rec = "Pendiente Factura" if mov_rec == "Ingreso" else "Validado"
+                    c_por_orig = str(registro.get("CreadoPor") or registro.get("Operario") or "Operario")
+                    f_crea_orig = str(registro.get("FechaCreacion") or now_rec)
+                    hist_rec = (
+                        f"{f_crea_orig} - Cargado originalmente por {c_por_orig}.\n"
+                        f"{now_rec} - Reclasificado desde Ficha de Mantenimiento #{detail_id} a Hidrocarburos por {usr_nom_rec}."
+                    )
+                    conn_rc = get_connection()
+                    cur_rc = conn_rc.cursor()
+                    cur_rc.execute("""
+                    INSERT INTO hidrocarburos (
+                        Fecha, Producto, Movimiento, Cantidad, Destino, Operario,
+                        FechaCreacion, HistorialModificaciones, CreadoPor,
+                        Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por, Observaciones
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        str(registro["Fecha"]), prod_rec, mov_rec, cant_rec, dest_rec, str(registro["Operario"]),
+                        f_crea_orig, hist_rec, c_por_orig,
+                        prov_rec.strip() if mov_rec == "Ingreso" else "", "", 0.0, est_val_rec, "", "", obs_rec.strip()
+                    ))
+                    cur_rc.execute("DELETE FROM mantenimientos WHERE id = ?", (detail_id,))
+                    guardar_cambios_db(conn_rc)
+                    st.success("🎉 ¡Registro trasladado con éxito al Balance de Hidrocarburos!")
+                    st.query_params.clear()
+                    st.rerun()
+
 def mostrar_ficha_checklist_independiente(chk_id):
     conn = get_connection()
     df = pd.read_sql_query("SELECT * FROM controles_diarios WHERE id = ?", conn, params=[chk_id])
@@ -1323,13 +1535,23 @@ def mostrar_ficha_checklist_independiente(chk_id):
             st.query_params.clear()
             st.rerun()
 
-def mostrar_registro_rapido_qr(maquina_qr):
-    st.title("📱 Registro Rápido por Código QR")
-    st.markdown(f"### 🚜 Máquina Intervenida: **{maquina_qr}**")
-    st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
-    st.markdown("---")
-    
-    tab_mant_qr, tab_chk_qr = st.tabs(["🔧 Registrar Mantenimiento", "📋 Control Diario (Check-List)"])
+def mostrar_registro_rapido_qr(maquina_qr, incluir_tab_combustible=True):
+    if incluir_tab_combustible:
+        st.title("📱 Registro Rápido por Código QR")
+        st.markdown(f"### 🚜 Máquina Intervenida: **{maquina_qr}**")
+        st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
+        st.markdown("---")
+        tab_mant_qr, tab_chk_qr, tab_comb_qr = st.tabs([
+            "🔧 Registrar Mantenimiento",
+            "📋 Control Diario (Check-List)",
+            "⛽ Cargar Combustible"
+        ])
+    else:
+        tab_mant_qr, tab_chk_qr = st.tabs([
+            "🔧 Reparación Mecánica",
+            "📋 Control Diario (Check-List)"
+        ])
+        tab_comb_qr = None
     
     empleados_list_db = cargar_lista_columna("empleados", "Nombre")
     usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
@@ -1363,18 +1585,25 @@ def mostrar_registro_rapido_qr(maquina_qr):
             guardar = st.form_submit_button("💾 Registrar Mantenimiento")
             
             if guardar:
+                tareas = []
+                if t1: tareas.append("Revisión General")
+                if t2: tareas.append("Lubricación/Engrase")
+                if t3: tareas.append("Cambio de Aceite")
+                if t7: tareas.append("Reparación Mecánica")
+                if t4: tareas.append("Limpieza de Filtros")
+                if t5: tareas.append("Ajuste de Correas/Pernos")
+                if t6: tareas.append("Reparación Eléctrica")
+
+                es_comb_qr, motivo_comb_qr = detectar_carga_combustible_en_mantenimiento(maquina_qr, detalle_adicional, bool(tareas))
                 if not operario:
                     st.error("⚠️ Por favor selecciona el técnico responsable.")
+                elif es_comb_qr:
+                    st.error(
+                        f"⛔ **¡Atención! Estás intentando cargar Combustible dentro de Mantenimiento Mecánico.** ({motivo_comb_qr})\n\n"
+                        "Si lo guardás acá, **NO impactará en el Balance de Stock ni generará aviso a Administración**.\n\n"
+                        "👉 **Solución:** Tocá la pestaña **'⛽ Cargar Combustible'** arriba para registrarlo correctamente."
+                    )
                 else:
-                    tareas = []
-                    if t1: tareas.append("Revisión General")
-                    if t2: tareas.append("Lubricación/Engrase")
-                    if t3: tareas.append("Cambio de Aceite")
-                    if t7: tareas.append("Reparación Mecánica")
-                    if t4: tareas.append("Limpieza de Filtros")
-                    if t5: tareas.append("Ajuste de Correas/Pernos")
-                    if t6: tareas.append("Reparación Eléctrica")
-                    
                     detalle_final = ", ".join(tareas)
                     if detalle_adicional:
                         if detalle_final:
@@ -1409,6 +1638,10 @@ def mostrar_registro_rapido_qr(maquina_qr):
 
     with tab_chk_qr:
         mostrar_checklist_diario_qr(maquina_qr, titulo_vis=False)
+
+    if tab_comb_qr is not None:
+        with tab_comb_qr:
+            mostrar_registro_hidro_qr(prod_pre="Gas-oil", mov_pre="Egreso", dest_pre=maquina_qr, titulo_vis=False, key_suffix="maq_comb")
 
 def mostrar_checklist_diario_qr(maquina_qr, titulo_vis=True):
     if titulo_vis:
@@ -1485,13 +1718,18 @@ def mostrar_checklist_diario_qr(maquina_qr, titulo_vis=True):
                 st.balloons()
                 st.info("Ya puede cerrar esta pestaña en su teléfono.")
 
-def mostrar_registro_hidro_qr(prod_pre=None):
-    st.title("⛽ Carga de Hidrocarburos por Código QR")
-    st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
-    st.markdown("---")
+def mostrar_registro_hidro_qr(prod_pre=None, mov_pre=None, dest_pre=None, titulo_vis=True, key_suffix="qr"):
+    if titulo_vis:
+        st.title("⛽ Carga de Hidrocarburos por Código QR")
+        st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
+        st.markdown("---")
     
     empleados_list_db = cargar_lista_columna("empleados", "Nombre")
     maquinas_list_db = cargar_lista_columna("maquinas", "Nombre")
+    destinos_qr = ["Stock Central", "OTROS"] + [
+        m for m in maquinas_list_db
+        if not es_equipo_virtual_combustible(m) and m not in ("Stock Central", "OTROS")
+    ]
     
     # Cargar hidrocarburos y lubricantes dinámicamente de productos usando palabras clave
     all_products_db = cargar_lista_columna("productos", "Nombre")
@@ -1507,16 +1745,24 @@ def mostrar_registro_hidro_qr(prod_pre=None):
     idx_prod = None
     if prod_pre and prod_pre in hidro_list_db:
         idx_prod = hidro_list_db.index(prod_pre)
+
+    mov_opts = ["Egreso", "Ingreso"]
+    idx_mov = mov_opts.index(mov_pre) if mov_pre in mov_opts else 0
+
+    idx_dest = None
+    if dest_pre and dest_pre in destinos_qr:
+        idx_dest = destinos_qr.index(dest_pre)
         
-    with st.form("form_hidro_qr"):
+    with st.form(f"form_hidro_{key_suffix}"):
         c1, c2 = st.columns(2)
-        movimiento = c1.selectbox("Movimiento", ["Egreso", "Ingreso"])
+        movimiento = c1.selectbox("Movimiento", mov_opts, index=idx_mov)
         producto = c1.selectbox("Tipo de Hidrocarburo", hidro_list_db, index=idx_prod, placeholder="Escribe para buscar tipo...")
         fecha_mov = c1.date_input("Fecha del Movimiento", value=datetime.now().date())
         cantidad = c2.number_input("Cantidad (Litros)", min_value=0.0, step=1.0)
-        destino = c2.selectbox("Destino", ["Stock Central"] + maquinas_list_db, index=None, placeholder="Escribe para buscar destino...")
+        destino = c2.selectbox("Destino (Usa 'Stock Central' para ingresos u 'OTROS' para terceros)", destinos_qr, index=idx_dest, placeholder="Escribe para buscar destino...")
         operario = st.selectbox("Responsable / Técnico", empleados_list_db, index=indice_default_op, placeholder="Escribe para buscar responsable...")
         
+        obs_qr = st.text_input("📝 Observaciones / Destinatario (obligatorio si eliges Destino 'OTROS'):", placeholder="Ej: Entrega a Buque Pederzini (entrega de arena), nota de descarga...").strip()
         prov_qr = st.text_input("🏢 Proveedor / Empresa Distribuidora (opcional si es Ingreso):", placeholder="Ej: YPF Directo, Axion, Shell, Distribuidor...").strip()
         
         btn_guardar = st.form_submit_button("💾 Cargar Registro de Hidrocarburos", use_container_width=True)
@@ -1525,6 +1771,8 @@ def mostrar_registro_hidro_qr(prod_pre=None):
                 st.error("⚠️ Por favor selecciona el tipo de hidrocarburo.")
             elif not destino:
                 st.error("⚠️ Por favor selecciona el destino.")
+            elif destino == "OTROS" and not obs_qr:
+                st.error("⚠️ Al seleccionar Destino 'OTROS', es obligatorio indicar en Observaciones a quién fue destinado (ej: Buque Pederzini).")
             elif not operario:
                 st.error("⚠️ Por favor selecciona el responsable.")
             elif cantidad <= 0:
@@ -1538,14 +1786,14 @@ def mostrar_registro_hidro_qr(prod_pre=None):
                 est_val = "Pendiente Factura" if movimiento == "Ingreso" else "Validado"
                 prov_final_qr = prov_qr if movimiento == "Ingreso" else ""
                 cursor.execute("""
-                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor, Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (fecha_mov.strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd, prov_final_qr, "", 0.0, est_val, "", ""))
+                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor, Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por, Observaciones)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (fecha_mov.strftime("%Y-%m-%d"), producto, movimiento, cantidad, destino, operario, fecha_creacion_hd, hist_hd, usr_hd, prov_final_qr, "", 0.0, est_val, "", "", obs_qr))
                 guardar_cambios_db(conn)
                 if movimiento == "Ingreso":
-                    st.success("🎉 ¡Ingreso de Hidrocarburos guardado con éxito! Se notificó a Administración para la vinculación de la factura/remito.")
+                    st.success("🎉 ¡Ingreso de Hidrocarburos guardado con éxito en el Balance de Stock! Se notificó a Administración para la vinculación de la factura/remito.")
                 else:
-                    st.success("🎉 ¡Egreso de Hidrocarburos guardado con éxito!")
+                    st.success("🎉 ¡Egreso de Hidrocarburos guardado con éxito en el Balance de Stock!")
                 st.balloons()
                 st.info("Ya puede continuar cargando o cerrar la ventana en su teléfono.")
 
@@ -1561,7 +1809,24 @@ elif "id_chk" in query_params:
     st.stop()
 elif "qr_maq" in query_params:
     maquina_qr = query_params["qr_maq"]
-    mostrar_registro_rapido_qr(maquina_qr)
+    # Si el QR impreso en planta corresponde a un tanque/stock de combustible (ej: 'Stock Central Gas-Oil'),
+    # redirigir automáticamente al registro de Hidrocarburos para que impacte en el Balance de Stock y alerte a Administración.
+    if es_equipo_virtual_combustible(maquina_qr):
+        st.info(f"⛽ **Tanque / Stock detectado ({maquina_qr}):** Registro directo en Balance de Hidrocarburos.")
+        mostrar_registro_hidro_qr(prod_pre="Gas-oil", mov_pre="Ingreso", dest_pre="Stock Central", key_suffix="tanque_qr")
+    elif es_surtidor_combustible(maquina_qr):
+        st.title(f"⛽ Surtidor / Estación: {maquina_qr}")
+        st.write(f"📅 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}")
+        t_surt_comb, t_surt_mant = st.tabs([
+            "⛽ Cargar / Despachar Combustible (Stock)",
+            "🔧 Reparación Mecánica del Surtidor"
+        ])
+        with t_surt_comb:
+            mostrar_registro_hidro_qr(prod_pre="Gas-oil", mov_pre="Egreso", titulo_vis=False, key_suffix="surtidor_qr")
+        with t_surt_mant:
+            mostrar_registro_rapido_qr(maquina_qr, incluir_tab_combustible=False)
+    else:
+        mostrar_registro_rapido_qr(maquina_qr)
     st.stop()
 elif "qr_checklist" in query_params:
     maquina_qr = query_params["qr_checklist"]
@@ -1575,6 +1840,11 @@ elif "qr_hidro" in query_params:
 # Carga de listas para menús desplegables
 
 maquinas_list = cargar_lista_columna("maquinas", "Nombre")
+maquinas_mant_list = [m for m in maquinas_list if not es_equipo_virtual_combustible(m)]
+destinos_hidro_list = ["Stock Central", "OTROS"] + [
+    m for m in maquinas_list
+    if not es_equipo_virtual_combustible(m) and m not in ("Stock Central", "OTROS")
+]
 empleados_list = cargar_lista_columna("empleados", "Nombre")
 
 # Cargar todos los productos y clasificarlos según palabras clave para evitar hardcoding
@@ -1961,7 +2231,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                 usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
                 indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
                     
-                maquina = c1.selectbox("Máquina Intervenida", maquinas_list, index=None, placeholder="Escribe para buscar máquina...")
+                maquina = c1.selectbox("Máquina Intervenida", maquinas_mant_list, index=None, placeholder="Escribe para buscar máquina...")
                 operario = c1.selectbox("Técnico Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar técnico...")
                 tipo = c2.selectbox("Tipo de Mantenimiento", ["Correctivo", "Preventivo"])
                 
@@ -1981,10 +2251,14 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                 repuestos = st.text_area("Observación / Repuestos usados (opcional)", placeholder="Ej: Se cambiaron retenes, juntas o repuestos...")
                 
                 if st.form_submit_button("Guardar Registro", use_container_width=True):
+                    tiene_tareas_sel = any([t1, t2, t3, t4, t5, t6, t7])
+                    es_comb_pc, motivo_comb_pc = detectar_carga_combustible_en_mantenimiento(maquina, repuestos, tiene_tareas_sel)
                     if not maquina:
                         st.error("⚠️ Por favor selecciona la máquina intervenida.")
                     elif not operario:
                         st.error("⚠️ Por favor selecciona el técnico responsable.")
+                    elif es_comb_pc:
+                        st.error(f"⛔ **Carga de Combustible detectada ({motivo_comb_pc}):** Estás en el módulo de **Mantenimiento Mecánico**, donde las cargas no impactan en el Balance de Stock. Por favor, regístrala desde el menú lateral **'⛽ Gestión de Combustibles & Lubricantes'** para actualizar el stock y notificar a Administración.")
                     else:
                         tareas = []
                         if t1: tareas.append("Revisión General")
@@ -2045,7 +2319,7 @@ elif menu == "🔧 Registro de Intervenciones (OT)":
                                        value=(st.session_state["maquina_seleccionada_pc"] not in equipos_base))
             
             if evaluar_otra:
-                maquina_seleccionada = st.selectbox("Máquina / Equipo", maquinas_list, index=None, placeholder="Escribe para buscar...")
+                maquina_seleccionada = st.selectbox("Máquina / Equipo", maquinas_mant_list, index=None, placeholder="Escribe para buscar...")
                 if maquina_seleccionada:
                     st.session_state["maquina_seleccionada_pc"] = maquina_seleccionada
             else:
@@ -2512,7 +2786,7 @@ elif menu == "📅 Programación & Plan de Mantenimiento (PCM)":
 
         with st.form(f"form_nueva_ot_pcm_{st.session_state['pcm_form_counter']}"):
             c_p1, c_p2 = st.columns(2)
-            maq_ot = c_p1.selectbox("Máquina / Activo Destino", maquinas_list, index=None, placeholder="Escriba para buscar equipo...")
+            maq_ot = c_p1.selectbox("Máquina / Activo Destino", maquinas_mant_list, index=None, placeholder="Escriba para buscar equipo...")
             tipo_ot = c_p2.selectbox("Tipo de Intervención", ["Preventivo Programado", "Correctivo Programado", "Inspección Periódica"])
             
             c_p3, c_p4 = st.columns(2)
@@ -2791,10 +3065,14 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
         prod_h = c1.selectbox("Tipo", hidro_list, index=None, placeholder="Escribe para buscar tipo...")
         fecha_h = c1.date_input("Fecha del Movimiento", value=datetime.now().date())
         cant_h = c2.number_input("Litros", min_value=0.0)
-        dest_h = c2.selectbox("Destino", ["Stock Central"] + maquinas_list, index=None, placeholder="Escribe para buscar destino...")
+        dest_h = c2.selectbox("Destino", destinos_hidro_list, index=None, placeholder="Escribe para buscar destino (o selecciona 'OTROS')...")
         usuario_logueado = st.session_state.get("nombre_completo", st.session_state.get("usuario", ""))
         indice_default_op = buscar_coincidencia_empleado(usuario_logueado, empleados_list)
-        oper_h = st.selectbox("Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar responsable...")
+        oper_h = c2.selectbox("Responsable", empleados_list, index=indice_default_op, placeholder="Escribe para buscar responsable...")
+        obs_h = st.text_input(
+            "📝 Observaciones / Destinatario Externo (obligatorio si el Destino es 'OTROS'):",
+            placeholder="Ej: Destinado a Buque Pederzini (entrega de arena), detalle de despacho o recepción..."
+        ).strip()
         
         st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
         st.markdown("###### 🧾 Datos de Factura / Remito (Administración & Proveedores)")
@@ -2802,13 +3080,15 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
         prov_h = c_f1.text_input("Proveedor", placeholder="Ej: YPF Directo / Distribuidor").strip()
         nro_fact_h = c_f2.text_input("N° de Factura / Remito", placeholder="Ej: A-0001-00045678").strip()
         imp_h = c_f3.number_input("Importe Total ($)", min_value=0.0, step=100.0)
-        st.caption("💡 Si es un Ingreso y aún no tienes la factura a mano, déjala en blanco. El sistema registrará los litros en stock y generará una alerta a Administración para completar la factura después.")
+        st.caption("💡 Si es un Ingreso y aún no tienes la factura a mano, deja el N° de Factura en blanco. El sistema registrará los litros en stock y generará una alerta a Administración para completar la factura después.")
 
         if st.form_submit_button("Cargar Registro", use_container_width=True):
             if not prod_h:
                 st.error("⚠️ Por favor selecciona el tipo de hidrocarburo.")
             elif not dest_h:
                 st.error("⚠️ Por favor selecciona el destino.")
+            elif dest_h == "OTROS" and not obs_h:
+                st.error("⚠️ Al seleccionar Destino 'OTROS', es obligatorio indicar en Observaciones a quién se destinó (ej: Buque Pederzini).")
             elif not oper_h:
                 st.error("⚠️ Por favor selecciona el responsable.")
             elif cant_h <= 0:
@@ -2819,19 +3099,23 @@ elif menu == "⛽ Gestión de Combustibles & Lubricantes":
                 fecha_creacion_hd = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 usr_hd = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Desconocido"))
                 hist_hd = f"{fecha_creacion_hd} - Registrado por usuario: {usr_hd}"
+                if obs_h:
+                    hist_hd += f" | Obs: {obs_h}"
                 
-                est_val = "Validado" if (t_m != "Ingreso" or nro_fact_h != "" or prov_h != "") else "Pendiente Factura"
+                est_val = "Validado" if (t_m != "Ingreso" or nro_fact_h != "") else "Pendiente Factura"
                 f_val = fecha_creacion_hd if est_val == "Validado" else ""
                 u_val = usr_hd if est_val == "Validado" else ""
 
                 cursor.execute("""
-                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor, Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (fecha_h.strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd, prov_h, nro_fact_h, imp_h, est_val, f_val, u_val))
+                INSERT INTO hidrocarburos (Fecha, Producto, Movimiento, Cantidad, Destino, Operario, FechaCreacion, HistorialModificaciones, CreadoPor, Proveedor, Nro_Factura, Importe, Estado_Validacion, Fecha_Validacion, Validado_Por, Observaciones)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (fecha_h.strftime("%Y-%m-%d"), prod_h, t_m, cant_h, dest_h, oper_h, fecha_creacion_hd, hist_hd, usr_hd, prov_h, nro_fact_h, imp_h, est_val, f_val, u_val, obs_h))
                 guardar_cambios_db(conn)
                 st.session_state["hidro_form_counter"] += 1
                 if t_m == "Ingreso" and est_val == "Pendiente Factura":
                     st.session_state["hidro_success_msg"] = f"🎉 ¡Ingreso de '{prod_h}' ({cant_h:,.0f} Litros) registrado! Se generó la alerta de 'Pendiente Factura' para Administración."
+                elif dest_h == "OTROS":
+                    st.session_state["hidro_success_msg"] = f"🎉 ¡Salida de '{prod_h}' ({cant_h:,.0f} Litros) con destino OTROS ({obs_h}) registrada y descontada del stock con éxito!"
                 else:
                     st.session_state["hidro_success_msg"] = f"🎉 ¡Movimiento de '{prod_h}' ({cant_h:,.0f} Litros) registrado con éxito! El panel se ha limpiado para la próxima carga."
                 st.rerun()
@@ -2871,6 +3155,8 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                         st.markdown("<span class='badge-operativo'>🟢 FACTURA VINCULADA Y VALIDADA</span>", unsafe_allow_html=True)
                     else:
                         st.markdown("<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span>", unsafe_allow_html=True)
+                elif str(r_d.get('Destino', '')).strip().upper() == "OTROS":
+                    st.markdown("<span class='badge-revision'>🟠 SALIDA A TERCEROS / OTROS</span>", unsafe_allow_html=True)
                 else:
                     st.markdown("<span class='badge-operativo'>⚪ SALIDA A CONSUMO INTERNO</span>", unsafe_allow_html=True)
             with c_head2:
@@ -2895,8 +3181,14 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                 if pd.isna(op_vis) or not str(op_vis).strip():
                     op_vis = "No especificado"
 
+                obs_vis = str(r_d.get('Observaciones', '')).strip() if pd.notna(r_d.get('Observaciones')) else ""
+                if obs_vis in ("None", "nan"):
+                    obs_vis = ""
+
                 st.markdown(f"📅 **Fecha del Movimiento:** {f_mov_vis}")
                 st.markdown(f"📍 **Destino / Equipo:** {r_d['Destino']}")
+                if obs_vis or str(r_d.get('Destino', '')).strip().upper() == "OTROS":
+                    st.markdown(f"📝 **Observaciones / Destinatario:** {obs_vis if obs_vis else '*(Sin detallar)*'}")
                 st.markdown(f"👤 **Cargado en el Sistema por:** `{creador_vis}`")
                 st.markdown(f"⏱️ **Fecha y Hora Exacta de Carga:** `{f_crea_vis}`")
                 st.markdown(f"👷 **Responsable en Planta:** {op_vis}")
@@ -2956,7 +3248,9 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             nuevo_mov = co2.selectbox("Movimiento", ["Ingreso", "Egreso"], index=0 if r_d['Movimiento'] == "Ingreso" else 1)
             nueva_cant = co2.number_input("Cantidad (Litros)", value=float(r_d['Cantidad']), min_value=0.0)
 
-            dest_list = ["Stock Central"] + maquinas_list
+            dest_list = ["Stock Central", "OTROS"] + [m for m in maquinas_list if not es_equipo_virtual_combustible(m) and m not in ("Stock Central", "OTROS")]
+            if r_d['Destino'] and r_d['Destino'] not in dest_list:
+                dest_list.append(r_d['Destino'])
             idx_dest = dest_list.index(r_d['Destino']) if r_d['Destino'] in dest_list else 0
             nuevo_dest = co3.selectbox("Destino", dest_list, index=idx_dest)
 
@@ -2964,66 +3258,84 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             idx_op = op_list.index(r_d['Operario']) if r_d['Operario'] in op_list else 0
             nuevo_op = co3.selectbox("Responsable en Planta", op_list, index=idx_op)
 
-            motivo_cambio = st.text_input("Motivo u Observación de la modificación (opcional):", placeholder="Ej: Corrección de número de factura por cambio de talonario")
+            nueva_obs = st.text_input(
+                "📝 Observaciones / Destinatario Externo (obligatorio si Destino es 'OTROS'):",
+                value=obs_vis,
+                placeholder="Ej: Destinado a Buque Pederzini (entrega de arena), notas de carga..."
+            )
+            motivo_cambio = st.text_input("Motivo de la modificación para Auditoría (opcional):", placeholder="Ej: Corrección de número de factura por cambio de talonario")
 
             col_btn_m1, col_btn_m2 = st.columns(2)
             btn_guardar_mod = col_btn_m1.form_submit_button("💾 Guardar Cambios y Cerrar", use_container_width=True)
             btn_cerrar_sin_guardar = col_btn_m2.form_submit_button("❌ Cerrar sin Guardar / Volver", use_container_width=True)
 
             if btn_guardar_mod:
-                cambios = []
-                if prov_vis != nuevo_prov.strip():
-                    cambios.append(f"Proveedor: '{prov_vis}' -> '{nuevo_prov.strip()}'")
-                if fact_vis != nuevo_fact.strip():
-                    cambios.append(f"Factura: '{fact_vis}' -> '{nuevo_fact.strip()}'")
-                if abs(imp_vis - float(nuevo_imp)) > 0.01:
-                    cambios.append(f"Importe: ${imp_vis:,.2f} -> ${float(nuevo_imp):,.2f}")
-                if str(r_d['Fecha']) != nueva_fecha.strftime("%Y-%m-%d"):
-                    cambios.append(f"Fecha: '{r_d['Fecha']}' -> '{nueva_fecha.strftime('%Y-%m-%d')}'")
-                if str(r_d['Producto']) != str(nuevo_prod):
-                    cambios.append(f"Producto: '{r_d['Producto']}' -> '{nuevo_prod}'")
-                if str(r_d['Movimiento']) != str(nuevo_mov):
-                    cambios.append(f"Movimiento: '{r_d['Movimiento']}' -> '{nuevo_mov}'")
-                if abs(float(r_d['Cantidad']) - float(nueva_cant)) > 0.01:
-                    cambios.append(f"Cantidad: {r_d['Cantidad']} -> {nueva_cant}")
-                if str(r_d['Destino']) != str(nuevo_dest):
-                    cambios.append(f"Destino: '{r_d['Destino']}' -> '{nuevo_dest}'")
-                op_final = "" if nuevo_op == "-- Sin especificar --" else nuevo_op
-                if str(r_d['Operario']) != str(op_final):
-                    cambios.append(f"Responsable: '{r_d['Operario']}' -> '{op_final}'")
-
-                if not cambios:
-                    st.info("ℹ️ No se detectaron modificaciones en los datos.")
+                if nuevo_dest == "OTROS" and not nueva_obs.strip():
+                    st.error("⚠️ Al seleccionar Destino 'OTROS', es obligatorio detallar en Observaciones a quién se destinó.")
                 else:
-                    usuario_activo = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Administración"))
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    detalle_log = f"{now_str} - Modificado por {usuario_activo}: " + ", ".join(cambios)
-                    if motivo_cambio.strip():
-                        detalle_log += f" | Motivo: {motivo_cambio.strip()}"
+                    cambios = []
+                    if prov_vis != nuevo_prov.strip():
+                        cambios.append(f"Proveedor: '{prov_vis}' -> '{nuevo_prov.strip()}'")
+                    if fact_vis != nuevo_fact.strip():
+                        cambios.append(f"Factura: '{fact_vis}' -> '{nuevo_fact.strip()}'")
+                    if abs(imp_vis - float(nuevo_imp)) > 0.01:
+                        cambios.append(f"Importe: ${imp_vis:,.2f} -> ${float(nuevo_imp):,.2f}")
+                    if str(r_d['Fecha']) != nueva_fecha.strftime("%Y-%m-%d"):
+                        cambios.append(f"Fecha: '{r_d['Fecha']}' -> '{nueva_fecha.strftime('%Y-%m-%d')}'")
+                    if str(r_d['Producto']) != str(nuevo_prod):
+                        cambios.append(f"Producto: '{r_d['Producto']}' -> '{nuevo_prod}'")
+                    if str(r_d['Movimiento']) != str(nuevo_mov):
+                        cambios.append(f"Movimiento: '{r_d['Movimiento']}' -> '{nuevo_mov}'")
+                    if abs(float(r_d['Cantidad']) - float(nueva_cant)) > 0.01:
+                        cambios.append(f"Cantidad: {r_d['Cantidad']} -> {nueva_cant}")
+                    if str(r_d['Destino']) != str(nuevo_dest):
+                        cambios.append(f"Destino: '{r_d['Destino']}' -> '{nuevo_dest}'")
+                    op_final = "" if nuevo_op == "-- Sin especificar --" else nuevo_op
+                    if str(r_d['Operario']) != str(op_final):
+                        cambios.append(f"Responsable: '{r_d['Operario']}' -> '{op_final}'")
+                    if obs_vis != nueva_obs.strip():
+                        cambios.append(f"Observaciones: '{obs_vis}' -> '{nueva_obs.strip()}'")
 
-                    nuevo_historial = (hist_audit + "\n" + detalle_log).strip()
+                    if not cambios:
+                        st.info("ℹ️ No se detectaron modificaciones en los datos.")
+                    else:
+                        usuario_activo = st.session_state.get("nombre_completo", st.session_state.get("usuario", "Administración"))
+                        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        detalle_log = f"{now_str} - Modificado por {usuario_activo}: " + ", ".join(cambios)
+                        if motivo_cambio.strip():
+                            detalle_log += f" | Motivo: {motivo_cambio.strip()}"
 
-                    nuevo_estado_val = "Validado" if (nuevo_mov != "Ingreso" or nuevo_fact.strip() != "" or nuevo_prov.strip() != "") else "Pendiente Factura"
-                    f_val_actualizada = now_str if (nuevo_estado_val == "Validado" and not f_val_vis) else r_d.get('Fecha_Validacion', '')
-                    u_val_actualizado = usuario_activo if (nuevo_estado_val == "Validado" and not val_por_vis) else r_d.get('Validado_Por', '')
+                        nuevo_historial = (hist_audit + "\n" + detalle_log).strip()
 
-                    conn_mod = get_connection()
-                    cur_mod = conn_mod.cursor()
-                    cur_mod.execute("""
-                    UPDATE hidrocarburos SET
-                        Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?,
-                        Proveedor = ?, Nro_Factura = ?, Importe = ?, Estado_Validacion = ?,
-                        Fecha_Validacion = ?, Validado_Por = ?, HistorialModificaciones = ?
-                    WHERE id = ?
-                    """, (
-                        nueva_fecha.strftime("%Y-%m-%d"), nuevo_prod, nuevo_mov, nueva_cant, nuevo_dest, op_final,
-                        nuevo_prov.strip(), nuevo_fact.strip(), nuevo_imp, nuevo_estado_val,
-                        f_val_actualizada, u_val_actualizado, nuevo_historial, id_a_mostrar
-                    ))
-                    guardar_cambios_db(conn_mod)
-                    cerrar_modal_hidro_cb()
-                    st.success("🎉 ¡Operación y factura actualizadas con éxito! Los cambios quedaron asentados en el historial de auditoría.")
-                    st.rerun()
+                        ya_estaba_validado = (str(r_d.get('Estado_Validacion', '')).strip() == "Validado")
+                        if nuevo_mov != "Ingreso" or nuevo_fact.strip() != "":
+                            nuevo_estado_val = "Validado"
+                        elif ya_estaba_validado and (nuevo_prov.strip() != "" or val_por_vis != ""):
+                            nuevo_estado_val = "Validado"
+                        elif prov_vis != nuevo_prov.strip() and nuevo_prov.strip() != "" and float(nuevo_imp) > 0:
+                            nuevo_estado_val = "Validado"
+                        else:
+                            nuevo_estado_val = "Pendiente Factura"
+                        f_val_actualizada = now_str if (nuevo_estado_val == "Validado" and not f_val_vis) else r_d.get('Fecha_Validacion', '')
+                        u_val_actualizado = usuario_activo if (nuevo_estado_val == "Validado" and not val_por_vis) else r_d.get('Validado_Por', '')
+
+                        conn_mod = get_connection()
+                        cur_mod = conn_mod.cursor()
+                        cur_mod.execute("""
+                        UPDATE hidrocarburos SET
+                            Fecha = ?, Producto = ?, Movimiento = ?, Cantidad = ?, Destino = ?, Operario = ?,
+                            Proveedor = ?, Nro_Factura = ?, Importe = ?, Estado_Validacion = ?,
+                            Fecha_Validacion = ?, Validado_Por = ?, HistorialModificaciones = ?, Observaciones = ?
+                        WHERE id = ?
+                        """, (
+                            nueva_fecha.strftime("%Y-%m-%d"), nuevo_prod, nuevo_mov, nueva_cant, nuevo_dest, op_final,
+                            nuevo_prov.strip(), nuevo_fact.strip(), nuevo_imp, nuevo_estado_val,
+                            f_val_actualizada, u_val_actualizado, nuevo_historial, nueva_obs.strip(), id_a_mostrar
+                        ))
+                        guardar_cambios_db(conn_mod)
+                        cerrar_modal_hidro_cb()
+                        st.success("🎉 ¡Operación y factura actualizadas con éxito! Los cambios quedaron asentados en el historial de auditoría.")
+                        st.rerun()
 
             if btn_cerrar_sin_guardar:
                 cerrar_modal_hidro_cb()
@@ -3108,12 +3420,14 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                         df_pend_filtrado = df_pend_filtrado[df_pend_filtrado['Proveedor'].astype(str).str.contains(filtro_prov_pend, case=False, na=False)]
                     if buscar_pend.strip():
                         b_term = buscar_pend.strip().lower()
+                        obs_col_p = df_pend_filtrado['Observaciones'].fillna('').astype(str).str.lower() if 'Observaciones' in df_pend_filtrado.columns else pd.Series('', index=df_pend_filtrado.index)
                         df_pend_filtrado = df_pend_filtrado[
                             df_pend_filtrado['Producto'].astype(str).str.lower().str.contains(b_term) |
                             df_pend_filtrado['Operario'].astype(str).str.lower().str.contains(b_term) |
                             df_pend_filtrado['Destino'].astype(str).str.lower().str.contains(b_term) |
                             df_pend_filtrado['Proveedor'].astype(str).str.lower().str.contains(b_term) |
-                            df_pend_filtrado['Nro_Factura'].astype(str).str.lower().str.contains(b_term)
+                            df_pend_filtrado['Nro_Factura'].astype(str).str.lower().str.contains(b_term) |
+                            obs_col_p.str.contains(b_term)
                         ]
                     
                     st.warning(f"⚠️ **Atención:** Hay **{len(df_pend_filtrado)} recepción(es) de combustible** mostradas. Completa el proveedor, factura e importe para validar cada carga:")
@@ -3129,11 +3443,16 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                                     st.markdown(f"<span class='badge-operativo'>🏢 Proveedor: {prov_actual}</span> &nbsp; <span class='badge-revision'>🟡 PENDIENTE FACTURA</span> &nbsp; <span class='badge-operativo'>📍 Destino: {r_pend['Destino']}</span>", unsafe_allow_html=True)
                                 else:
                                     st.markdown(f"<span class='badge-revision'>🟡 PENDIENTE DE FACTURA / REMITO</span> &nbsp; <span class='badge-operativo'>📍 Destino: {r_pend['Destino']}</span>", unsafe_allow_html=True)
+                                obs_pend = str(r_pend.get('Observaciones', '')).strip() if pd.notna(r_pend.get('Observaciones')) else ""
+                                if obs_pend in ("None", "nan"):
+                                    obs_pend = ""
                                 f_vis = formatear_fecha_visible(r_pend['Fecha'])
                                 op_vis = r_pend['Operario'] if pd.notna(r_pend['Operario']) and str(r_pend['Operario']).strip() else 'No especificado'
                                 crea_vis = r_pend.get('CreadoPor', 'Desconocido')
                                 f_crea_vis = formatear_fecha_hora_visible(r_pend.get('FechaCreacion', ''))
                                 st.caption(f"📅 **Fecha Recepción:** {f_vis} | 👤 **Recibió en Planta:** {op_vis} | ⏱️ **Cargado por:** {crea_vis} ({f_crea_vis})")
+                                if obs_pend:
+                                    st.caption(f"📝 **Detalle / Observaciones de Planta:** {obs_pend}")
                             
                             with cp2:
                                 with st.popover("📝 Cargar Factura / Indicar Proveedor", use_container_width=True):
@@ -3174,6 +3493,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                                                     log_v += f" | Obs: {val_obs}"
                                                 hist_prev_v = str(r_pend.get('HistorialModificaciones', '')) if pd.notna(r_pend.get('HistorialModificaciones')) else ""
                                                 hist_new_v = (hist_prev_v + "\n" + log_v).strip()
+                                                obs_final_v = f"{obs_pend} | {val_obs.strip()}" if (obs_pend and val_obs.strip()) else (val_obs.strip() or obs_pend)
                                                 
                                                 cur_v.execute("""
                                                 UPDATE hidrocarburos SET
@@ -3183,9 +3503,10 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                                                     Estado_Validacion = 'Validado',
                                                     Fecha_Validacion = ?,
                                                     Validado_Por = ?,
-                                                    HistorialModificaciones = ?
+                                                    HistorialModificaciones = ?,
+                                                    Observaciones = ?
                                                 WHERE id = ?
-                                                """, (val_prov_final, val_fact, val_imp, now_str_v, usr_v, hist_new_v, p_id))
+                                                """, (val_prov_final, val_fact, val_imp, now_str_v, usr_v, hist_new_v, obs_final_v, p_id))
                                                 guardar_cambios_db(conn_v)
                                                 st.success("🎉 ¡Ingreso validado con éxito! La alerta se ha apagado.")
                                                 st.rerun()
@@ -3311,7 +3632,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             st.divider()
 
             # Asegurar columnas si faltan
-            for col_extra in ["Proveedor", "Nro_Factura", "Importe", "Estado_Validacion"]:
+            for col_extra in ["Proveedor", "Nro_Factura", "Importe", "Estado_Validacion", "Observaciones"]:
                 if col_extra not in df_mostrar.columns:
                     df_mostrar[col_extra] = "" if col_extra != "Importe" else 0.0
 
@@ -3322,10 +3643,11 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
 
             # Selector directo para abrir la ventana flotante
             st.markdown("##### 🔍 Historial de Movimientos")
-            st.caption("💡 Haz clic en cualquier fila de la tabla o selecciona un movimiento de la lista para abrir directamente su ventana flotante con el detalle de la factura, creador, hora y auditoría.")
+            st.caption("💡 Haz clic en cualquier fila de la tabla o selecciona un movimiento de la lista para abrir directamente su ventana flotante con el detalle de la factura, destinatario, creador, hora y auditoría.")
 
             opciones_modal_h = ["-- Seleccionar registro para ver detalle y factura --"] + [
-                f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts) | {r['Destino']}" 
+                f"ID {r['id']} | {formatear_fecha_visible(r['Fecha'])} | {r['Producto']} | {r['Movimiento']} ({r['Cantidad']} Lts) | {r['Destino']}"
+                + (f" ({str(r.get('Observaciones', '')).strip()})" if str(r.get('Observaciones', '')).strip() not in ("", "None", "nan") else "")
                 for _, r in df_mostrar.sort_values(by='id', ascending=False).iterrows()
             ]
 
@@ -3366,10 +3688,13 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             df_mostrar_sorted["Movimiento"] = df_mostrar_sorted["Movimiento"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
             df_mostrar_sorted["Destino"] = df_mostrar_sorted["Destino"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
             df_mostrar_sorted["Operario"] = df_mostrar_sorted["Operario"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "-")
+            df_mostrar_sorted["Observaciones"] = df_mostrar_sorted["Observaciones"].astype(str).apply(lambda x: str(x).strip() if str(x).strip() not in ["None", "nan", ""] else "")
         
             # Badge de Estado de Validación
-            def badge_validacion(val, mov, prov="", fact="", val_por=""):
+            def badge_validacion(val, mov, prov="", fact="", val_por="", dest=""):
                 if mov != "Ingreso":
+                    if str(dest).strip().upper() == "OTROS":
+                        return "🟠 Salida Terceros / Otros"
                     return "⚪ Salida Consumo"
                 tiene_fact = bool(str(prov).strip() or str(fact).strip() or str(val_por).strip())
                 if str(val).strip() == "Validado" and tiene_fact:
@@ -3377,11 +3702,11 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                 return "🟡 Pendiente Factura"
             
             df_mostrar_sorted["Estado_Val_Badge"] = df_mostrar_sorted.apply(
-                lambda r: badge_validacion(r.get('Estado_Validacion', ''), r.get('Movimiento', ''), r.get('Proveedor', ''), r.get('Nro_Factura', ''), r.get('Validado_Por', '')),
+                lambda r: badge_validacion(r.get('Estado_Validacion', ''), r.get('Movimiento', ''), r.get('Proveedor', ''), r.get('Nro_Factura', ''), r.get('Validado_Por', ''), r.get('Destino', '')),
                 axis=1
             )
 
-            cols_a_mostrar = ["id", "Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario", "Estado_Val_Badge", "Proveedor", "Nro_Factura"]
+            cols_a_mostrar = ["id", "Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Observaciones", "Operario", "Estado_Val_Badge", "Proveedor", "Nro_Factura"]
             event_df_h = st.dataframe(
                 df_mostrar_sorted[cols_a_mostrar],
                 column_config={
@@ -3391,6 +3716,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
                     "Movimiento": st.column_config.TextColumn("Movimiento"),
                     "Cantidad": st.column_config.NumberColumn("Cantidad (Lts)", format="%.1f Lts"),
                     "Destino": st.column_config.TextColumn("Destino"),
+                    "Observaciones": st.column_config.TextColumn("Observaciones / Destinatario"),
                     "Operario": st.column_config.TextColumn("Responsable"),
                     "Estado_Val_Badge": st.column_config.TextColumn("Estado Validación"),
                     "Proveedor": st.column_config.TextColumn("Proveedor"),
@@ -3422,7 +3748,7 @@ elif menu == "📋 Balances & Reportes de Hidrocarburos":
             c_exp1, c_exp2 = st.columns(2)
         
             # 1. Excel
-            excel_df_h = df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Operario"]].copy()
+            excel_df_h = df_mostrar_sorted[["Fecha", "Producto", "Movimiento", "Cantidad", "Destino", "Observaciones", "Operario", "Proveedor", "Nro_Factura"]].copy()
             excel_h_bytes = generar_excel_bytes(excel_df_h, "Movimientos Hidrocarburos")
         
             c_exp1.download_button(
@@ -3469,16 +3795,19 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
             nueva_m = st.text_input("Añadir Nueva Máquina")
             if st.button("➕ Guardar Máquina"):
                 if nueva_m:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    try:
-                        cursor.execute("INSERT INTO maquinas (Nombre) VALUES (?)", (nueva_m,))
-                        guardar_cambios_db(conn)
-                    except sqlite3.IntegrityError:
-                        st.error("Esa máquina ya está registrada.")
-                    finally:
-                        conn.close()
-                    st.rerun()
+                    if es_equipo_virtual_combustible(nueva_m):
+                        st.error("⛔ Los tanques de 'Stock Central' de combustible no deben cargarse como máquinas mecánicas. Utilice el módulo y código QR de Hidrocarburos.")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        try:
+                            cursor.execute("INSERT INTO maquinas (Nombre) VALUES (?)", (nueva_m.strip(),))
+                            guardar_cambios_db(conn)
+                        except sqlite3.IntegrityError:
+                            st.error("Esa máquina ya está registrada.")
+                        finally:
+                            conn.close()
+                        st.rerun()
         
             st.divider()
             if maquinas_list:
@@ -3681,13 +4010,13 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         use_container_width=True
                     )
 
-            if maquinas_list:
+            if maquinas_mant_list:
                 st.divider()
                 st.subheader("📋 Generación de Códigos QR para Máquinas")
                 st.markdown("##### 📌 Generar QR de una Máquina Individual")
-                m_qr = st.selectbox("Seleccionar Máquina para QR", ["-- Seleccionar --"] + maquinas_list)
+                m_qr = st.selectbox("Seleccionar Máquina para QR", ["-- Seleccionar --"] + maquinas_mant_list)
                 if m_qr != "-- Seleccionar --":
-                    url_qr = f"{base_url_qr}/?qr_maq={urllib.parse.quote(m_qr)}"
+                    url_qr = f"{base_url_qr}/?qr_hidro=Gas-oil" if es_equipo_virtual_combustible(m_qr) else f"{base_url_qr}/?qr_maq={urllib.parse.quote(m_qr)}"
                     api_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_qr)}"
                 
                     col_q1, col_q2 = st.columns([1, 2])
@@ -3702,7 +4031,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                 st.markdown("##### 🖨️ Grilla de Códigos QR de Toda la Planta (Imprimible)")
                 if st.checkbox("👁️ Mostrar todos los QR de máquinas juntas para imprimir"):
                     cols_qr = st.columns(3)
-                    for idx, maq_name in enumerate(maquinas_list):
+                    for idx, maq_name in enumerate(maquinas_mant_list):
                         col_curr = cols_qr[idx % 3]
                         with col_curr:
                             with st.container(border=True):
@@ -3742,7 +4071,7 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
                         tasks.append(("00_Acceso_General_App.png", "[ ACCESO AL SISTEMA ]", "ARENERAS DE LA CRUZ Y ROZAS", base_url_qr, "Escanear con celular para ingresar a la aplicacion web"))
                         
                         # 1. Add machines
-                        for m in maquinas_list:
+                        for m in maquinas_mant_list:
                             clean_m = limpiar_texto_para_qr(m)
                             url_m = f"{base_url_qr}/?qr_maq={urllib.parse.quote(m)}"
                             tasks.append((f"Maquina_{clean_m.replace('/', '_').replace(' ', '_')}.png", "[ EQUIPO / MAQUINARIA ]", clean_m, url_m, "Escanear con celular para registrar actividad o control diario"))
@@ -3995,14 +4324,15 @@ elif menu == "⚙️ Datos Maestros & Gestión QR":
         # 1. Hidrocarburos
         try:
             df_hidro_aud = pd.read_sql_query("""
-                SELECT FechaCreacion, CreadoPor, Producto, Movimiento, Cantidad, Destino, HistorialModificaciones 
+                SELECT FechaCreacion, CreadoPor, Producto, Movimiento, Cantidad, Destino, Observaciones, HistorialModificaciones 
                 FROM hidrocarburos 
                 ORDER BY id DESC
             """, conn)
             for _, row in df_hidro_aud.iterrows():
                 creador = row['CreadoPor'] if row['CreadoPor'] else "Desconocido"
                 f_creacion = row['FechaCreacion'] if row['FechaCreacion'] else "Carga Inicial"
-                detalle = f"{row['Movimiento']} de {row['Cantidad']}L de {row['Producto']} con destino {row['Destino']}"
+                obs_aud = str(row.get('Observaciones', '') or '').strip()
+                detalle = f"{row['Movimiento']} de {row['Cantidad']}L de {row['Producto']} con destino {row['Destino']}" + (f" ({obs_aud})" if obs_aud else "")
                 activity_data.append({
                     "Fecha y Hora": f_creacion,
                     "Usuario": creador,
